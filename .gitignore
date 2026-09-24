@@ -1,0 +1,7 @@
+.localservice/
+bin/
+.DS_Store
+*.ipa
+*.dmg
+*.pkg
+*.xcarchive/

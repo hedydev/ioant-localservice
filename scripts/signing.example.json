@@ -1,0 +1,11 @@
+{
+  "projects": {
+    "demo-app": {
+      "archive": "/absolute/path/to/DemoApp.xcarchive",
+      "team_id": "64RS366WKG",
+      "method": "release-testing",
+      "channel": "dev",
+      "allow_provisioning_updates": true
+    }
+  }
+}
