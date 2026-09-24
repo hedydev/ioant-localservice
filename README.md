@@ -1,139 +1,158 @@
 # Localservice
 
-运行在 Mac 的局域网安装包服务。Go 1.24+，无第三方 Go 依赖，前端嵌入单个二进制。iPhone / iPad / Mac 可浏览多项目、最新构建、历史安装包与更新说明。上传和下载均使用流式 IO；文件保存到本地，不依赖云存储。
+Localservice is a LAN package distribution service designed to run on a Mac. It uses Go 1.24+, has no third-party Go dependencies, and embeds the web UI into a single binary. iPhone, iPad, and Mac devices can browse multiple projects, view the latest builds, review release history, compare updates, and download installation packages. Uploads and downloads use streaming I/O, and artifacts are stored locally without requiring cloud storage.
 
-## 启动
+## Start the service
 
-```sh
+~~~sh
 go build -o bin/localservice ./cmd/localservice
 ./bin/localservice
-```
+~~~
 
-打开 `http://localhost:8787`。其他设备使用 `http://<Mac局域网IP>:8787`，需要 Mac 防火墙允许入站并处于同一网络。默认监听 `0.0.0.0:8787`；仅本机调试用 `-listen 127.0.0.1:8787`。
+Open `http://localhost:8787` on the Mac. Other devices on the same LAN can use `http://<mac-lan-ip>:8787`. The Mac firewall must allow inbound access and the devices must be on the same reachable network. The default listen address is `0.0.0.0:8787`; for Mac-only development use `-listen 127.0.0.1:8787`.
 
-首次启动生成 `.localservice/admin-token`（权限 0600）。在 Mac 查看此文件，点击页面“发布管理”输入密钥；然后创建项目、上传包。**不要把密钥提交到 Git 或 AI 对话中**。浏览下载默认对局域网开放；写入、查看设备 UDID、请求签名需要密钥。页面密钥只在内存保存。HTTP 仅适合受信任的开发局域网；需要传输密钥时优先使用 HTTPS。
+On first launch, Localservice creates `.localservice/admin-token` with file mode `0600`. Read this file locally on the Mac, open **Release Management** in the web UI, and enter the token to create projects and upload packages. **Never commit the token to Git or paste it into AI conversations.** Browsing and downloading are open to the LAN by default. Write operations, device UDID access, and signing requests require the token. The browser keeps the token only in memory. Plain HTTP is intended only for trusted development LANs; prefer HTTPS whenever the admin token is transmitted.
 
-默认数据目录 `.localservice/`，可用 `-data /absolute/path` 修改。安装包保存在 `artifacts/`，元数据 `state.json` 原子写入。备份整个数据目录。**同一数据目录只能启动一个进程**；目前不支持多实例或集群。没有自动删除历史版本。
+The default data directory is `.localservice/`. Use `-data /absolute/path` to change it. Packages are stored under `artifacts/`, while metadata is written atomically to `state.json`. Back up the entire data directory. **Only one Localservice process may use a given data directory at a time.** Multi-instance and clustered operation are not currently supported. Historical releases are not deleted automatically.
 
-## 从本地项目目录点击发布
+## Publish from a local project directory
 
-管理页新增“从项目目录发布”：关联目录后识别当前 Git、分支、upstream 和根目录 / scripts 下的 `release*.sh`，读取同名 `.md` 展示说明。选中脚本后在该目录执行 `git pull --ff-only`，再运行脚本完成构建、打包、上传；工作区不干净或分支不符时停止。支持多个脚本和每次发布多个产物。详细规范见 [RELEASE_SCRIPTS.md](docs/RELEASE_SCRIPTS.md)。
+The management page includes **Publish from Project Directory**. After a project directory is linked, Localservice detects the current Git repository, branch, upstream, and release scripts named `release*.sh` in the repository root or `scripts/` directory. A matching `.md` file can provide release-script documentation.
 
-## iOS：签名与“信任”有什么区别
+After a release script is selected, Localservice runs `git pull --ff-only` in that project directory and then executes the release script to build, package, and upload artifacts. The operation stops if the working tree is dirty or the branch does not match the expected branch. Multiple release scripts and multiple artifacts per release job are supported. See [RELEASE_SCRIPTS.md](docs/RELEASE_SCRIPTS.md) for the full contract.
 
-- Safari 下载或信任 `.mobileconfig` **不会让 iPhone 自己给 IPA 签名**。真正的签名使用 Mac 钥匙串中的私钥和 Xcode 的账号。
-- 付费 Apple Developer 团队适合 `release-testing`（Ad Hoc）导出。需要 Apple 团队已登记的 UDID、包含设备的描述文件、匹配的 Bundle ID / entitlement 和有效签名。
-- `debugging` 导出是开发签名：在设备开启 Developer Mode，再使用 Xcode / Apple Configurator 安装。服务不会把开发包显示成保证可用的网页安装。
-- Ad Hoc 网页安装需要 **iPhone 实际信任的 HTTPS 证书**，manifest 与 IPA 都从配置的 HTTPS origin 提供。HTTP 可下载文件，不能满足 OTA 条件。
-- 上传 IPA 会读取主应用 Info.plist 和描述文件的类型、设备数量、到期时间。此检查**不等于验证代码签名、设备授权或完整 entitlement 匹配**。页面不会假装安装已成功。
-- 免费 Personal Team 不适合本服务的 Ad Hoc 网页分发；其描述文件通常 7 天到期。
+## iOS: signing versus device trust
 
-## Mac 签名服务
+- Downloading or trusting a `.mobileconfig` profile in Safari **does not allow an iPhone to sign an IPA by itself**. Actual signing is performed on the Mac using the private key in Keychain and the Apple account configured in Xcode.
+- A paid Apple Developer team can use `release-testing` / Ad Hoc distribution. The target device UDID must be registered with the Apple team, the provisioning profile must include the device, and the Bundle ID, entitlements, certificate, and profile must all match.
+- `debugging` export uses development signing. Developer Mode must be enabled on the device, and installation normally uses Xcode or Apple Configurator. Localservice does not present a development-signed package as guaranteed to support browser-based installation.
+- Ad Hoc over-the-air installation requires an **HTTPS certificate actually trusted by the iPhone**. Both the manifest and IPA must be served from the configured HTTPS origin. HTTP can download files, but it does not satisfy OTA installation requirements.
+- When an IPA is uploaded, Localservice reads the main app Info.plist and reports the provisioning profile type, device count, and expiration time. This check **does not prove that the full code signature, device authorization, or all entitlements are valid**. The UI does not claim installation success.
+- A free Personal Team is not appropriate for Ad Hoc browser distribution and typically uses development provisioning with short-lived profiles.
 
-已经支持 HTTP 触发 **Xcode 归档导出和签名**，不是任意来源 IPA 的通用重签服务。保留项目原有扩展和 entitlement 由 Xcode 处理。需要先在 Xcode 设置里登录账号，钥匙串中有证书和私钥，并准备自己的 `.xcarchive`。
+## Mac signing service
 
-```sh
-# 只查看团队、有效签名身份、描述文件类型/到期时间，不导出私钥或登录令牌
+Localservice supports HTTP-triggered **Xcode archive export and signing**. It is not a generic IPA re-signing service for arbitrary packages. Xcode remains responsible for the project's extensions and entitlements. Before using signing, sign in to the Apple account in Xcode, ensure the required certificate and private key exist in Keychain, and prepare the project's `.xcarchive`.
+
+~~~sh
+# Show teams, valid signing identities, and provisioning profile type/expiration.
+# This does not export private keys or login tokens.
 python3 scripts/doctor.py
 
-# 配置已存在的项目归档，修改 archive 为实际绝对路径
+# Configure an existing project archive.
+# Replace archive with the actual absolute path.
 cp scripts/signing.example.json .localservice/signing.json
 chmod 600 .localservice/signing.json
-```
+~~~
 
-示例团队 `64RS366WKG` 来自此 Mac 已存在的 Apple Distribution 身份。复制配置不会自动构建业务项目。先在你的项目中构建归档，例如（以该项目自身构建说明为准）：
+The example team ID `64RS366WKG` comes from an Apple Distribution identity already present on this Mac. Copying the configuration does not build the application. Create the archive in the application project first, following that project's build instructions. Example:
 
-```sh
+~~~sh
 xcodebuild -project /path/to/DemoApp.xcodeproj -scheme DemoApp \
   -configuration Release -destination 'generic/platform=iOS' \
   -archivePath /path/to/DemoApp.xcarchive \
   DEVELOPMENT_TEAM=64RS366WKG CODE_SIGN_STYLE=Automatic \
   -allowProvisioningUpdates archive
-```
+~~~
 
-页面“iOS 签名与安装 → 请求 Mac 签名”，或 `POST /api/projects/demo-app/signing`（Bearer 鉴权）。返回 `202` 与任务 `id`；`GET /api/signing/{id}` 查询 `running / succeeded / failed`，同样需要鉴权。一次只运行一个签名任务，20 分钟超时，成功后自动上传到该项目。当前只允许本机配置中的 archive；远程不能指定任意命令或本地路径。
+Use **iOS Signing & Installation -> Request Mac Signing** in the UI, or call `POST /api/projects/demo-app/signing` with Bearer authentication. The service returns `202` and a signing task `id`. Query `GET /api/signing/{id}` with the same authentication to read `running`, `succeeded`, or `failed` status.
 
-`allow_provisioning_updates: true` 允许 Xcode 使用已登录账号向 Apple 更新签名资料，可能创建描述文件/证书。**它不保证注册浏览器提交的新 UDID**。新设备在 Apple Developer 网站登记后再导出；否则仍不可安装。日志只存本机 `.localservice/signing/<id>/xcodebuild.log`，不会通过公开接口泄露。任务成功与失败会保存在本地；服务重启后的未完成任务需要重新发起。修改 signing.json 无需重启。
+Only one signing task runs at a time. Each task has a 20-minute timeout. A successful export is automatically published to the selected project. Remote callers cannot supply arbitrary local paths or commands; signing uses only archives configured on the Mac.
 
-再次签同一版本、同一 build 后，文件可能不同；这时上传会返回 409，需在源码递增构建号并重新归档，或选择另一发布渠道，不会覆盖历史安装包。
+`allow_provisioning_updates: true` allows Xcode to use the signed-in Apple account to update signing assets and may create provisioning profiles or certificates. **It does not guarantee automatic registration of a new UDID submitted through the browser.** Register a new device with the Apple Developer account before exporting a new Ad Hoc build.
 
-## 设备自助登记入口
+Signing logs remain local at `.localservice/signing/<id>/xcodebuild.log` and are not exposed through public APIs. Completed and failed tasks are persisted locally. Any incomplete task interrupted by a service restart must be requested again. Changes to `signing.json` do not require a Localservice restart.
 
-1. 配置 HTTPS（下一节），iPhone 在 Safari 打开页面。
-2. 点击“登记这台 iPhone / iPad”，下载 `localservice-device.mobileconfig`。
-3. 到“设置 → 通用 → VPN 与设备管理”确认。该描述文件没有 MDM、根证书、SCEP 或签名权限，只请求 UDID、产品型号、系统版本，可能显示“未签名”。
-4. iOS 回传设备信息；页面提示已收集。管理员输入发布密钥并点击“查看待登记设备”，复制 UDID 到 Apple Developer 的 Devices 登记。
-5. 更新 Ad Hoc 描述文件，再请求 Mac 签名；从分发页面安装新包。
+Re-signing the same version and build can produce a different binary. If a different file is uploaded under the same release identity, Localservice returns `409`. Increment the application's build number and archive again, or use a different release channel. Historical artifacts are never silently overwritten.
 
-登记 challenge 有效 15 分钟、一次使用。设备资料保存在受限的本地 `devices/`，公开列表不返回 UDID。服务校验回传 CMS 内容签名，但**未实现 Apple 设备证书链认证**，所以记录标为 `identity_verified: false` 和 `pending_apple_registration`，必须由管理员核对，不能据此自动信任设备或耗用 Apple 设备名额。手机实际描述文件安装、重定向和 OTA 仍需真机验证。
+## Self-service device enrollment
+
+1. Configure HTTPS as described below, then open Localservice in Safari on the iPhone or iPad.
+2. Select **Enroll this iPhone / iPad** to download `localservice-device.mobileconfig`.
+3. In iOS, open **Settings -> General -> VPN & Device Management** and approve the profile. The profile contains no MDM payload, root certificate, SCEP configuration, or signing capability. It only requests the UDID, product model, and operating system version, and it may appear as unsigned.
+4. iOS sends the device information back to Localservice. An administrator can enter the release token, open the pending device list, and copy the UDID into Apple Developer Devices.
+5. Update the Ad Hoc provisioning profile, request a new Mac signing job, and install the newly published build from the distribution page.
+
+Enrollment challenges expire after 15 minutes and can be used only once. Device records are stored in the restricted local `devices/` directory. Public project and release APIs never expose UDIDs.
+
+Localservice validates the signature of the returned CMS payload, but **does not currently validate the Apple device certificate chain**. Device records therefore remain `identity_verified: false` and `pending_apple_registration`. An administrator must verify the device before consuming an Apple device slot or trusting the record for signing decisions. Physical-device profile installation, redirects, and OTA installation still require manual validation.
 
 ## HTTPS
 
-已有受设备信任的域名与证书时：
+If you already have a hostname and certificate trusted by the target devices:
 
-```sh
+~~~sh
 ./bin/localservice -listen 0.0.0.0:8787 \
   -public-url https://builds.example.com:8787 \
   -tls-cert /path/to/fullchain.pem -tls-key /path/to/private-key.pem
-```
+~~~
 
-也可以由本地 HTTPS 反向代理终止 TLS，服务监听环回地址；`-public-url` 填用户访问的 HTTPS origin。服务只使用这一固定地址生成 IPA/manifest/设备回传链接，不信任任意 Host 请求头。自签证书需要设备先建立完整信任，仅在描述文件上点击信任不够。第一版不自动创建/安装根证书、不修改 DNS 或防火墙。
+TLS can also terminate at a local HTTPS reverse proxy while Localservice listens only on loopback. Set `-public-url` to the HTTPS origin that users actually open. Localservice uses this fixed origin to generate IPA, manifest, and device callback URLs instead of trusting arbitrary Host headers.
 
-## 项目 / AI 自动推送
+A self-signed certificate must first become fully trusted by the device. Merely trusting an enrollment profile is not sufficient. The current implementation does not automatically create or install a root certificate and does not modify DNS or firewall settings.
 
-Sowhat 开发 AI 的本机接入参数与构建发布步骤见 [SOWHAT_RELEASE_HANDOFF.md](docs/SOWHAT_RELEASE_HANDOFF.md)。通用知识已整理为 hero-skills 的 `publish-localservice-builds` skill；Sowhat 是首个接入项目，不限制其他项目复用。
+## Project and AI automated publishing
 
-**开发 AI 可以直接作为管理员发布。** 用户已授权负责接入项目的开发 AI 在构建发布任务中读取本机 `.localservice/admin-token`，通过 Bearer 接口创建项目、上传安装包及查询发布结果，不需要网页登录或每次再次确认。`scripts/push.sh` 已支持这一方式。凭据不向模型输出或写入文档；其他机器需单独配置受保护的凭据文件。当前是服务级共享管理员密钥，没有每个 AI / 项目的独立账号或权限隔离，AI 应只操作其负责的项目。
+Machine-specific Sowhat integration parameters and its build/publish workflow are documented in [SOWHAT_RELEASE_HANDOFF.md](docs/SOWHAT_RELEASE_HANDOFF.md). The reusable workflow is also documented in the hero-skills `publish-localservice-builds` skill. Sowhat is the first integrated project, but the publishing contract is designed for additional projects.
 
-先创建项目 `demo-app`。在打包成功后调用：
+**A project development AI may publish as an administrator when explicitly authorized for that project workflow.** On this development Mac, the authorized workflow may read `.localservice/admin-token` locally and use the Bearer API to create projects, upload installation packages, and verify release records without requiring a browser login for every release. `scripts/push.sh` supports this flow.
 
-```sh
+The credential must never be printed into model output or written into documentation. Other machines must configure their own protected credential file. Localservice currently uses one service-wide administrator token; it does not yet provide per-project or per-agent accounts or permission isolation. Automation should operate only on the project it is responsible for.
+
+Create a project such as `demo-app`, then publish after packaging succeeds:
+
+~~~sh
 export LOCALSERVICE_URL=http://127.0.0.1:8787
 export LOCALSERVICE_TOKEN_FILE=/path/to/ioant-localservice/.localservice/admin-token
-export RELEASE_NOTES='新增语音入口，修复连接断开'
+export RELEASE_NOTES='Add voice entry point and fix connection disconnect handling'
 ./scripts/push.sh demo-app 1.0.0 12 ios /path/to/DemoApp.ipa dev arm64
 ./scripts/push.sh demo-app 1.0.0 12 macos /path/to/DemoApp.dmg dev universal
-```
+~~~
 
-脚本不会在命令行参数或正常输出里打印密钥。支持包最大 4 GiB。iOS 的 version / build 必须与 IPA 的 `CFBundleShortVersionString / CFBundleVersion` 完全一致。版本目前使用完整 SemVer `x.y.z[-prerelease][+metadata]`；构建号必须是正整数，不接受 Apple 允许的点分构建号。macOS 支持 `.dmg / .pkg / .zip`，iOS 支持 `.ipa`；不支持裸 `.app` 或上传 `.xcarchive`。
+The script does not print the admin token in command arguments or normal output. The maximum supported upload size is 4 GiB. For iOS, `version` and `build` must exactly match `CFBundleShortVersionString` and `CFBundleVersion` in the IPA.
 
-接口返回相对 `download_url`；AI/客户端应按服务 origin 解析。相同项目、安装包标识 variant、平台、架构、渠道、version 和 build 下，相同 SHA-256 重试返回 200；不同文件返回 409。页面每 20 秒刷新，新包自动显示，旧包保留。
+Versions use full SemVer: `x.y.z[-prerelease][+metadata]`. The build number must currently be a positive integer; dotted Apple build numbers are not accepted. macOS accepts `.dmg`, `.pkg`, and `.zip`. iOS accepts `.ipa`. Bare `.app` bundles and `.xcarchive` uploads are not supported.
 
-| 接口 | 功能 | 鉴权 |
+API responses return a relative `download_url`; clients should resolve it against the Localservice origin. For the same project, variant, platform, architecture, channel, version, and build, retrying an identical SHA-256 artifact returns `200`. Uploading different file contents under the same release identity returns `409`. The web UI refreshes every 20 seconds, new builds appear automatically, and historical builds remain available.
+
+| Endpoint | Purpose | Authentication |
 |---|---|---|
-| GET /api/health | 服务状态、OTA 配置状态、上传上限 | 无 |
-| GET /api/projects | 项目列表 | 无 |
-| POST /api/projects | JSON `{ "id":"demo-app", "name":"SoWhat" }` | Bearer |
-| GET /api/projects/{project}/releases | 版本历史，SemVer + build 降序 | 无 |
-| POST /api/projects/{project}/releases | multipart: version, build, platform, architecture, channel, variant, notes, file（构建脚本另传 job_id） | Bearer |
-| GET /api/projects/{project}/updates | 检查更新 | 无 |
-| GET /api/releases/{id}/download | 下载与 Range 断点续传 | 无 |
-| GET /api/releases/{id}/manifest.plist | 合适的 iOS 包生成 OTA manifest | 无 |
-| POST /api/projects/{project}/signing | 签名并发布预配置归档 | Bearer |
-| GET /api/signing/{id} | 签名任务状态 | Bearer |
-| GET /api/devices/enroll.mobileconfig | 一次性设备信息收集描述文件 | 无 |
-| POST /api/devices/callback/{challenge} | iOS CMS 设备回传 | 一次性 challenge |
-| GET /api/devices | 设备 UDID 待办列表 | Bearer |
+| `GET /api/health` | Service status, OTA configuration state, and upload limit | None |
+| `GET /api/projects` | Project list | None |
+| `POST /api/projects` | Create a project with JSON such as `{ "id":"demo-app", "name":"SoWhat" }` | Bearer |
+| `GET /api/projects/{project}/releases` | Release history sorted by SemVer and build descending | None |
+| `POST /api/projects/{project}/releases` | Multipart upload: version, build, platform, architecture, channel, variant, notes, file; build scripts may also send job_id | Bearer |
+| `GET /api/projects/{project}/updates` | Check for updates | None |
+| `GET /api/releases/{id}/download` | Download with HTTP Range support | None |
+| `GET /api/releases/{id}/manifest.plist` | Generate an OTA manifest for eligible iOS packages | None |
+| `POST /api/projects/{project}/signing` | Sign and publish a preconfigured archive | Bearer |
+| `GET /api/signing/{id}` | Read signing task status | Bearer |
+| `GET /api/devices/enroll.mobileconfig` | Generate a one-time device information enrollment profile | None |
+| `POST /api/devices/callback/{challenge}` | Receive the iOS CMS device callback | One-time challenge |
+| `GET /api/devices` | Read the pending device UDID list | Bearer |
 
-更新检查示例：
+Example update check:
 
-```sh
+~~~sh
 curl 'http://127.0.0.1:8787/api/projects/demo-app/updates?platform=ios&architecture=arm64&channel=dev&current_version=1.0.0&current_build=11'
-```
+~~~
 
-先比较 SemVer，再比较 build；不同渠道不会混用，架构筛选包含兼容的 universal 包。元数据 `+...` 不影响 SemVer 大小；预发布版本小于同版本正式版。客户端比服务新时不会提示降级。浏览器无法自动读取手机上已安装 App 版本，需要 App 调用接口或手动输入。
+Localservice compares SemVer first and build number second. Channels are isolated. Architecture filtering includes compatible `universal` packages. SemVer build metadata (`+...`) does not affect precedence, and a prerelease is lower than the corresponding stable release. If the client is newer than the latest server release, Localservice does not recommend a downgrade.
 
-## 交付范围与待配置项
+A browser cannot automatically read the version of an application already installed on an iPhone. The app must call the update API itself, or the user must provide the current version manually.
 
-按要求不继续执行测试，实际签名、手机描述文件安装与 OTA 下载由使用者验证。
+## Delivery scope and remaining configuration
 
-已经实现服务代码、网页、HTTP API、设备资料收集、Xcode 归档签名任务和自动发布脚本。实际签名与安装还需要有效项目归档、Apple 网络访问、已登记设备、Ad Hoc 描述文件及受设备信任的 HTTPS。目前没有自动绑定任何业务项目，也没有修改其他项目。
+The service implementation, web UI, HTTP API, device-information collection flow, Xcode archive signing task, automated publishing script, and Sowhat integration documentation are implemented. Per the current development workflow, Localservice itself does not perform physical-device acceptance testing; final signing, profile installation, and OTA installation are validated by the user.
 
-本机已读取到团队 `64RS366WKG` 和 Apple Distribution 身份；并未导出登录令牌、账号密码或私钥。本机当前找到的描述文件为开发类型，Ad Hoc 分发需要 Xcode 为指定项目导出适用描述文件。
+Successful real-device distribution still requires a valid project archive, Apple network access, registered devices, a suitable Ad Hoc provisioning profile, and an HTTPS origin trusted by the target device.
 
-Apple 参考：
-- [登记设备分发](https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices)
-- [创建 Ad Hoc 描述文件](https://developer.apple.com/help/account/provisioning-profiles/create-an-ad-hoc-provisioning-profile)
-- [开发者模式](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)
-- [设备信息收集协议（归档文档）](https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/iPhoneOTAConfiguration/profile-service/profile-service.html)
-- [账号能力与 Personal Team 限制](https://developer.apple.com/support/compare-memberships/)
+The Mac currently exposes team `64RS366WKG` and an Apple Distribution signing identity to the local diagnostic tooling. Localservice does not export Apple login tokens, account passwords, or private keys. Provisioning profiles found during the initial development setup were development profiles; Ad Hoc distribution requires Xcode to export an appropriate profile for the target project and registered devices.
+
+## Apple references
+
+- [Distribute to registered devices](https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices)
+- [Create an Ad Hoc provisioning profile](https://developer.apple.com/help/account/provisioning-profiles/create-an-ad-hoc-provisioning-profile)
+- [Enable Developer Mode on a device](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)
+- [Device information enrollment protocol (archived)](https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/iPhoneOTAConfiguration/profile-service/profile-service.html)
+- [Apple Developer membership capabilities](https://developer.apple.com/support/compare-memberships/)
