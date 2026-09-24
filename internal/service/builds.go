@@ -29,6 +29,20 @@ type ReleaseScript struct {
 	Ready    bool   `json:"ready"`
 	Reason   string `json:"reason,omitempty"`
 }
+type ReleaseProfile struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Platform           string `json:"platform"`
+	Architecture       string `json:"architecture"`
+	Channel            string `json:"channel"`
+	Variant            string `json:"variant"`
+	BuildCommand       string `json:"build_command"`
+	PackageCommand     string `json:"package_command,omitempty"`
+	Artifact           string `json:"artifact"`
+	VersionCommand     string `json:"version_command,omitempty"`
+	BuildNumberCommand string `json:"build_number_command,omitempty"`
+	Notes              string `json:"notes,omitempty"`
+}
 type SourceInfo struct {
 	BuildSource
 	CurrentBranch string          `json:"current_branch"`
@@ -42,7 +56,10 @@ type SourceInfo struct {
 type BuildJob struct {
 	ID         string     `json:"id"`
 	ProjectID  string     `json:"project_id"`
-	Script     string     `json:"script"`
+	Mode       string     `json:"mode,omitempty"`
+	Script     string     `json:"script,omitempty"`
+	ProfileID  string     `json:"profile_id,omitempty"`
+	Title      string     `json:"title,omitempty"`
 	Status     string     `json:"status"`
 	Stage      string     `json:"stage"`
 	Error      string     `json:"error,omitempty"`
@@ -181,6 +198,112 @@ func (a *App) readSource(id string) (BuildSource, error) {
 	e = json.Unmarshal(b, &s)
 	return s, e
 }
+func (a *App) releaseProfilePath(project, id string) string {
+	return filepath.Join(a.data, "release-profiles", project, id+".json")
+}
+func (a *App) readReleaseProfile(project, id string) (ReleaseProfile, error) {
+	var p ReleaseProfile
+	if !slugRE.MatchString(project) || !slugRE.MatchString(id) {
+		return p, fmt.Errorf("Release Profile 标识无效")
+	}
+	b, e := os.ReadFile(a.releaseProfilePath(project, id))
+	if e != nil {
+		return p, e
+	}
+	e = json.Unmarshal(b, &p)
+	return p, e
+}
+func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
+	p.ID = strings.TrimSpace(p.ID)
+	p.Name = strings.TrimSpace(p.Name)
+	p.Platform = strings.TrimSpace(p.Platform)
+	p.Architecture = strings.TrimSpace(p.Architecture)
+	p.Channel = strings.TrimSpace(p.Channel)
+	p.Variant = strings.TrimSpace(p.Variant)
+	p.BuildCommand = strings.TrimSpace(p.BuildCommand)
+	p.PackageCommand = strings.TrimSpace(p.PackageCommand)
+	p.Artifact = strings.TrimSpace(p.Artifact)
+	p.VersionCommand = strings.TrimSpace(p.VersionCommand)
+	p.BuildNumberCommand = strings.TrimSpace(p.BuildNumberCommand)
+	if p.Channel == "" { p.Channel = "dev" }
+	if p.Variant == "" { p.Variant = "default" }
+	if p.Architecture == "" {
+		if p.Platform == "ios" { p.Architecture = "arm64" } else { p.Architecture = "universal" }
+	}
+	if !slugRE.MatchString(p.ID) || p.Name == "" || len(p.Name) > 120 {
+		return p, fmt.Errorf("Profile ID 或名称无效")
+	}
+	if !oneOf(p.Platform, "ios", "macos") || !oneOf(p.Channel, "dev", "beta", "stable") || !oneOf(p.Architecture, "arm64", "x86_64", "universal") || (p.Platform == "ios" && p.Architecture != "arm64") {
+		return p, fmt.Errorf("平台、架构或渠道无效")
+	}
+	if !slugRE.MatchString(p.Variant) { return p, fmt.Errorf("variant 必须是小写字母、数字或连字符") }
+	if p.BuildCommand == "" || len(p.BuildCommand) > 32768 || len(p.PackageCommand) > 32768 || p.Artifact == "" || len(p.Artifact) > 2048 {
+		return p, fmt.Errorf("需要有效的构建命令和产物路径")
+	}
+	if strings.ContainsRune(p.Artifact, 0) || filepath.IsAbs(p.Artifact) {
+		return p, fmt.Errorf("产物路径必须相对项目目录，或使用 ILS_OUTPUT_DIR")
+	}
+	cleanArtifact := filepath.Clean(p.Artifact)
+	if strings.HasPrefix(cleanArtifact, ".."+string(filepath.Separator)) || cleanArtifact == ".." {
+		return p, fmt.Errorf("产物路径不能逃离项目目录；需要外部产物时使用 ILS_OUTPUT_DIR")
+	}
+	if p.Platform == "macos" && (p.VersionCommand == "" || p.BuildNumberCommand == "") {
+		return p, fmt.Errorf("macOS Profile 需要 version command 与 build number command")
+	}
+	if len(p.VersionCommand) > 8192 || len(p.BuildNumberCommand) > 8192 || len(p.Notes) > 16000 {
+		return p, fmt.Errorf("Profile 字段过长")
+	}
+	return p, nil
+}
+func (a *App) listReleaseProfiles(project string) ([]ReleaseProfile, error) {
+	paths, e := filepath.Glob(filepath.Join(a.data, "release-profiles", project, "*.json"))
+	if e != nil { return nil, e }
+	out := []ReleaseProfile{}
+	for _, path := range paths {
+		b, e := os.ReadFile(path)
+		if e != nil { return nil, e }
+		var p ReleaseProfile
+		if e = json.Unmarshal(b, &p); e != nil { return nil, e }
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+func (a *App) releaseProfiles(w http.ResponseWriter, r *http.Request) {
+	if !a.authorized(w, r) { return }
+	project := r.PathValue("project")
+	a.mu.RLock(); exists := a.projectExists(project); a.mu.RUnlock()
+	if !exists { fail(w, 404, "项目不存在"); return }
+	if r.Method == "GET" {
+		profiles, e := a.listReleaseProfiles(project)
+		if e != nil { fail(w, 500, "读取 Release Profiles 失败"); return }
+		respond(w, 200, profiles); return
+	}
+	if _, e := a.readSource(project); e != nil { fail(w, 409, "请先关联本地项目目录"); return }
+	var p ReleaseProfile
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)); dec.DisallowUnknownFields()
+	if e := dec.Decode(&p); e != nil { fail(w, 400, "Release Profile 格式无效"); return }
+	p, e := normalizeReleaseProfile(p)
+	if e != nil { fail(w, 400, e.Error()); return }
+	a.buildMu.Lock(); defer a.buildMu.Unlock()
+	if a.activeBuild != "" { fail(w, 409, "构建期间不能修改 Release Profile"); return }
+	path := a.releaseProfilePath(project, p.ID)
+	if e = os.MkdirAll(filepath.Dir(path), 0700); e == nil { e = atomicJSON(path, p) }
+	if e != nil { fail(w, 500, "保存 Release Profile 失败"); return }
+	respond(w, 200, p)
+}
+func (a *App) deleteReleaseProfile(w http.ResponseWriter, r *http.Request) {
+	if !a.authorized(w, r) { return }
+	project, id := r.PathValue("project"), r.PathValue("profile")
+	if !slugRE.MatchString(project) || !slugRE.MatchString(id) { fail(w, 404, "Release Profile 不存在"); return }
+	a.buildMu.Lock(); defer a.buildMu.Unlock()
+	if a.activeBuild != "" { fail(w, 409, "构建期间不能删除 Release Profile"); return }
+	if e := os.Remove(a.releaseProfilePath(project, id)); e != nil {
+		if os.IsNotExist(e) { fail(w, 404, "Release Profile 不存在") } else { fail(w, 500, "删除 Release Profile 失败") }
+		return
+	}
+	respond(w, 200, map[string]bool{"deleted": true})
+}
 func (a *App) buildSource(w http.ResponseWriter, r *http.Request) {
 	if !a.authorized(w, r) {
 		return
@@ -273,65 +396,42 @@ func (a *App) writeBuild(j BuildJob) error {
 	return atomicJSON(a.buildJobPath(j.ID), j)
 }
 func (a *App) startBuild(w http.ResponseWriter, r *http.Request) {
-	if !a.authorized(w, r) {
-		return
-	}
+	if !a.authorized(w, r) { return }
 	id := r.PathValue("project")
-	s, e := a.readSource(id)
-	if e != nil {
-		fail(w, 409, "请先关联项目目录")
-		return
+	source, e := a.readSource(id)
+	if e != nil { fail(w, 409, "请先关联项目目录"); return }
+	var input struct { Script string `json:"script"`; Profile string `json:"profile"` }
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil || (input.Script == "") == (input.Profile == "") {
+		fail(w, 400, "请选择一个项目脚本或 ILS Release Profile"); return
 	}
-	var input struct {
-		Script string `json:"script"`
-	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil || !releaseScriptRE.MatchString(input.Script) {
-		fail(w, 400, "请选择已识别的发布脚本")
-		return
-	}
-	info, e := inspectSource(s)
-	if e != nil {
-		fail(w, 409, e.Error())
-		return
-	}
-	if info.Blocker != "" {
-		fail(w, 409, info.Blocker)
-		return
-	}
-	found := false
-	for _, x := range info.Scripts {
-		if x.Path == input.Script && x.Ready {
-			found = true
-		}
-	}
-	if !found {
-		fail(w, 409, "脚本或 Markdown 说明不可用")
-		return
+	info, e := inspectSource(source)
+	if e != nil { fail(w, 409, e.Error()); return }
+	if info.Blocker != "" { fail(w, 409, info.Blocker); return }
+	var profile *ReleaseProfile
+	mode, title := "script", input.Script
+	if input.Profile != "" {
+		p, e := a.readReleaseProfile(id, input.Profile)
+		if e != nil { fail(w, 404, "ILS Release Profile 不存在"); return }
+		p, e = normalizeReleaseProfile(p)
+		if e != nil { fail(w, 409, e.Error()); return }
+		profile = &p; mode, title = "profile", p.Name
+	} else {
+		if !releaseScriptRE.MatchString(input.Script) { fail(w, 400, "请选择已识别的发布脚本"); return }
+		found := false
+		for _, x := range info.Scripts { if x.Path == input.Script && x.Ready { found = true } }
+		if !found { fail(w, 409, "脚本或 Markdown 说明不可用"); return }
 	}
 	a.buildMu.Lock()
-	if a.activeBuild != "" {
-		a.buildMu.Unlock()
-		fail(w, 409, "已有构建正在执行，请稍后发布")
-		return
-	}
-	j := BuildJob{ID: randomID(16), ProjectID: id, Script: input.Script, Status: "running", Stage: "pull", CreatedAt: time.Now().UTC(), ReleaseIDs: []string{}}
-	if e = os.MkdirAll(filepath.Dir(a.buildJobPath(j.ID)), 0700); e == nil {
-		e = atomicJSON(a.buildJobPath(j.ID), j)
-	}
-	if e != nil {
-		a.buildMu.Unlock()
-		fail(w, 500, "创建构建任务失败")
-		return
-	}
+	if a.activeBuild != "" { a.buildMu.Unlock(); fail(w, 409, "已有构建正在执行，请稍后发布"); return }
+	j := BuildJob{ID: randomID(16), ProjectID: id, Mode: mode, Script: input.Script, ProfileID: input.Profile, Title: title, Status: "running", Stage: "pull", CreatedAt: time.Now().UTC(), ReleaseIDs: []string{}}
+	if e = os.MkdirAll(filepath.Dir(a.buildJobPath(j.ID)), 0700); e == nil { e = atomicJSON(a.buildJobPath(j.ID), j) }
+	if e != nil { a.buildMu.Unlock(); fail(w, 500, "创建构建任务失败"); return }
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
-	a.activeBuild = j.ID
-	a.cancelBuild = cancel
-	a.buildReceipts = map[string][]string{j.ID: {}}
+	a.activeBuild = j.ID; a.cancelBuild = cancel; a.buildReceipts = map[string][]string{j.ID: {}}
 	a.buildMu.Unlock()
-	go a.runBuild(ctx, cancel, j, s)
+	go a.runBuild(ctx, cancel, j, source, profile)
 	respond(w, 202, j)
 }
-
 // Child scripts may publish more than one artifact. Track accepted uploads,
 // including idempotent retries, rather than trusting a successful shell exit.
 func (a *App) recordBuildPublication(job, project, release string) {
@@ -464,85 +564,112 @@ func runProcess(ctx context.Context, root string, log io.Writer, env []string, n
 	cmd.WaitDelay = 3 * time.Second
 	return cmd.Run()
 }
-func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJob, s BuildSource) {
-	defer func() { cancel(); a.buildMu.Lock(); a.activeBuild = ""; a.cancelBuild = nil; a.buildMu.Unlock() }()
-	finish := func(status, message string) {
-		a.buildMu.Lock()
-		j.ReleaseIDs = append([]string{}, a.buildReceipts[j.ID]...)
-		a.buildMu.Unlock()
-		j.Status = status
-		j.Error = message
-		now := time.Now().UTC()
-		j.FinishedAt = &now
-		_ = a.writeBuild(j)
+type smallCapture struct { data []byte; truncated bool }
+func (w *smallCapture) Write(p []byte) (int, error) {
+	n := len(p); const limit = 16 << 10
+	if len(w.data) < limit {
+		keep := limit-len(w.data)
+		if len(p)>keep { w.data=append(w.data,p[:keep]...); w.truncated=true } else { w.data=append(w.data,p...) }
+	} else if len(p)>0 { w.truncated=true }
+	return n,nil
+}
+func runValueCommand(ctx context.Context, root string, log io.Writer, env []string, command string) (string, error) {
+	var out smallCapture
+	cmd := exec.CommandContext(ctx, "/bin/bash", "-lc", command)
+	cmd.Dir=root; cmd.Env=env; cmd.Stdout=&out; cmd.Stderr=log
+	cmd.SysProcAttr=&syscall.SysProcAttr{Setpgid:true}
+	cmd.Cancel=func() error { if cmd.Process!=nil { return syscall.Kill(-cmd.Process.Pid,syscall.SIGKILL) }; return nil }
+	cmd.WaitDelay=3*time.Second
+	if e:=cmd.Run(); e!=nil { return "",e }
+	if out.truncated { return "",fmt.Errorf("命令输出超过 16 KiB") }
+	value:=strings.TrimSpace(string(out.data))
+	if value=="" || strings.ContainsAny(value,"\r\n") { return "",fmt.Errorf("命令必须只输出一个值") }
+	return value,nil
+}
+func resolveProfileArtifact(root, output, pattern string) (string,error) {
+	replacer:=strings.NewReplacer("${ILS_OUTPUT_DIR}",output,"$ILS_OUTPUT_DIR",output,"${LOCALSERVICE_OUTPUT_DIR}",output,"$LOCALSERVICE_OUTPUT_DIR",output)
+	pattern=replacer.Replace(pattern)
+	if strings.Contains(pattern,"$") { return "",fmt.Errorf("产物路径包含不支持的环境变量") }
+	if !filepath.IsAbs(pattern) { pattern=filepath.Join(root,filepath.FromSlash(pattern)) }
+	matches,e:=filepath.Glob(pattern)
+	if e!=nil { return "",fmt.Errorf("产物路径无效") }
+	if len(matches)!=1 { return "",fmt.Errorf("产物路径必须唯一匹配一个文件，当前匹配 %d 个",len(matches)) }
+	real,e:=filepath.EvalSymlinks(matches[0]); if e!=nil { return "",fmt.Errorf("找不到构建产物") }
+	info,e:=os.Stat(real); if e!=nil || !info.Mode().IsRegular() { return "",fmt.Errorf("构建产物不是普通文件") }
+	return real,nil
+}
+func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJob, source BuildSource, profile *ReleaseProfile) {
+	defer func(){ cancel(); a.buildMu.Lock(); a.activeBuild=""; a.cancelBuild=nil; a.buildMu.Unlock() }()
+	finish:=func(status,message string){
+		a.buildMu.Lock(); j.ReleaseIDs=append([]string{},a.buildReceipts[j.ID]...); a.buildMu.Unlock()
+		j.Status=status; j.Error=message; now:=time.Now().UTC(); j.FinishedAt=&now; _=a.writeBuild(j)
 	}
-	f, e := os.OpenFile(filepath.Join(a.data, "builds", j.ID, "build.log"), os.O_CREATE|os.O_WRONLY, 0600)
-	if e != nil {
-		finish("failed", "无法创建日志")
-		return
-	}
+	f,e:=os.OpenFile(filepath.Join(a.data,"builds",j.ID,"build.log"),os.O_CREATE|os.O_WRONLY,0600)
+	if e!=nil { finish("failed","无法创建日志"); return }
 	defer f.Close()
-	log := &cappedLog{file: f, secret: a.token}
-	defer log.Flush()
-	// Recheck immediately before mutating this local working directory.
-	info, e := inspectSource(s)
-	if e != nil || info.Blocker != "" {
-		finish("failed", "执行前 Git 状态发生变化，请重新扫描")
-		return
-	}
-	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	fmt.Fprintln(log, "执行 git pull --ff-only（禁用 Git hooks / autostash）")
-	pullCtx, pullCancel := context.WithTimeout(ctx, 3*time.Minute)
-	e = runProcess(pullCtx, s.Path, log, env, "git", "-c", "core.hooksPath=/dev/null", "-c", "rebase.autoStash=false", "-c", "merge.autoStash=false", "pull", "--ff-only")
+	log:=&cappedLog{file:f,secret:a.token}; defer log.Flush()
+	info,e:=inspectSource(source)
+	if e!=nil || info.Blocker!="" { finish("failed","执行前 Git 状态发生变化，请重新扫描"); return }
+	env:=append(os.Environ(),"GIT_TERMINAL_PROMPT=0")
+	fmt.Fprintln(log,"ILS: git pull --ff-only (hooks and autostash disabled)")
+	pullCtx,pullCancel:=context.WithTimeout(ctx,3*time.Minute)
+	e=runProcess(pullCtx,source.Path,log,env,"git","-c","core.hooksPath=/dev/null","-c","rebase.autoStash=false","-c","merge.autoStash=false","pull","--ff-only")
 	pullCancel()
-	if e != nil {
-		finish("failed", "git pull 失败，未执行发布脚本；详情见日志")
-		return
+	if e!=nil { finish("failed","git pull 失败，未执行构建；详情见日志"); return }
+	info,e=inspectSource(source)
+	if e!=nil || info.Blocker!="" { finish("failed","拉取后的 Git 状态不满足发布条件，请重新扫描"); return }
+	upstreamHead,e:=gitRead(source.Path,"rev-parse","@{upstream}")
+	if e!=nil || info.Head!=upstreamHead { finish("failed","本地 HEAD 与 upstream 不一致，请先由开发者处理"); return }
+	if profile==nil {
+		ready:=false; for _,x:=range info.Scripts { if x.Path==j.Script && x.Ready { ready=true } }
+		if !ready { finish("failed","拉取后脚本已删除或说明不完整，请重新扫描"); return }
 	}
-	info, e = inspectSource(s)
-	if e != nil || info.Blocker != "" {
-		finish("failed", "拉取后的 Git 状态不满足发布条件，请重新扫描")
-		return
-	}
-	upstreamHead, e := gitRead(s.Path, "rev-parse", "@{upstream}")
-	if e != nil || info.Head != upstreamHead {
-		finish("failed", "本地 HEAD 与 upstream 不一致，请先由开发者处理")
-		return
-	}
-	scriptReady := false
-	for _, x := range info.Scripts {
-		if x.Path == j.Script && x.Ready {
-			scriptReady = true
+	j.Commit=info.Head
+	output:=filepath.Join(a.data,"builds",j.ID,"output")
+	if e=os.MkdirAll(output,0700); e!=nil { finish("failed","无法创建产物目录"); return }
+	tokenFile:=filepath.Join(a.data,"admin-token")
+	env=append(env,
+		"LOCALSERVICE_URL="+a.buildOrigin,"LOCALSERVICE_TOKEN_FILE="+tokenFile,"LOCALSERVICE_ROOT="+a.buildRoot,
+		"LOCALSERVICE_PROJECT_ID="+j.ProjectID,"LOCALSERVICE_JOB_ID="+j.ID,"LOCALSERVICE_OUTPUT_DIR="+output,"LOCALSERVICE_GIT_COMMIT="+j.Commit,
+		"ILS_URL="+a.buildOrigin,"ILS_TOKEN_FILE="+tokenFile,"ILS_ROOT="+a.buildRoot,"ILS_PROJECT_ID="+j.ProjectID,
+		"ILS_JOB_ID="+j.ID,"ILS_OUTPUT_DIR="+output,"ILS_GIT_COMMIT="+j.Commit)
+	if profile==nil {
+		j.Stage="script"; _=a.writeBuild(j)
+		fmt.Fprintf(log,"Source %s\nRun project script: /bin/bash %s\n",j.Commit,j.Script)
+		if e=runProcess(ctx,source.Path,log,env,"/bin/bash",j.Script); e!=nil { finish("failed","项目发布脚本失败或任务超时；已上传的包会保留，请查看日志"); return }
+	} else {
+		j.Stage="build"; _=a.writeBuild(j)
+		fmt.Fprintf(log,"Source %s\nILS Release Profile: %s (%s)\n",j.Commit,profile.Name,profile.ID)
+		if e=runProcess(ctx,source.Path,log,env,"/bin/bash","-lc",profile.BuildCommand); e!=nil { finish("failed","ILS Build Command 失败或任务超时；详情见日志"); return }
+		if profile.PackageCommand!="" {
+			j.Stage="package"; _=a.writeBuild(j)
+			if e=runProcess(ctx,source.Path,log,env,"/bin/bash","-lc",profile.PackageCommand); e!=nil { finish("failed","ILS Package Command 失败或任务超时；详情见日志"); return }
 		}
+		artifact,e:=resolveProfileArtifact(source.Path,output,profile.Artifact)
+		if e!=nil { finish("failed",e.Error()); return }
+		ext:=strings.ToLower(filepath.Ext(artifact))
+		if (profile.Platform=="ios"&&ext!=".ipa") || (profile.Platform=="macos"&&!oneOf(ext,".dmg",".pkg",".zip")) { finish("failed","Profile 产物类型与平台不匹配"); return }
+		var version,build string
+		if profile.Platform=="ios" {
+			ipa,e:=inspectIPA(artifact); if e!=nil { finish("failed","IPA 检查失败："+e.Error()); return }
+			version,build=ipa.Version,ipa.Build
+		} else {
+			j.Stage="metadata"; _=a.writeBuild(j)
+			version,e=runValueCommand(ctx,source.Path,log,env,profile.VersionCommand); if e!=nil { finish("failed","无法读取 macOS version："+e.Error()); return }
+			build,e=runValueCommand(ctx,source.Path,log,env,profile.BuildNumberCommand); if e!=nil { finish("failed","无法读取 macOS build number："+e.Error()); return }
+		}
+		if !validVersion(version) { finish("failed","Profile 解析出的 version 不是有效 SemVer"); return }
+		if _,e=parseBuild(build); e!=nil { finish("failed","Profile 解析出的 build number 必须是正整数"); return }
+		j.Stage="publish"; _=a.writeBuild(j)
+		push:=filepath.Join(a.buildRoot,"scripts","push.sh")
+		if stat,statErr:=os.Stat(push); statErr!=nil || !stat.Mode().IsRegular() { finish("failed","ILS scripts/push.sh 不可用"); return }
+		profileEnv:=append(env,"RELEASE_NOTES="+profile.Notes)
+		fmt.Fprintf(log,"Publish %s version %s build %s\n",filepath.Base(artifact),version,build)
+		if e=runProcess(ctx,source.Path,log,profileEnv,"/bin/bash",push,j.ProjectID,version,build,profile.Platform,artifact,profile.Channel,profile.Architecture,profile.Variant); e!=nil { finish("failed","ILS 发布失败；详情见日志"); return }
 	}
-	if !scriptReady {
-		finish("failed", "拉取后脚本已删除或说明不完整，请重新扫描")
-		return
-	}
-	j.Commit = info.Head
-	j.Stage = "script"
-	_ = a.writeBuild(j)
-	output := filepath.Join(a.data, "builds", j.ID, "output")
-	if e = os.MkdirAll(output, 0700); e != nil {
-		finish("failed", "无法创建产物目录")
-		return
-	}
-	env = append(env, "LOCALSERVICE_URL="+a.buildOrigin, "LOCALSERVICE_TOKEN_FILE="+filepath.Join(a.data, "admin-token"), "LOCALSERVICE_ROOT="+a.buildRoot, "LOCALSERVICE_PROJECT_ID="+j.ProjectID, "LOCALSERVICE_JOB_ID="+j.ID, "LOCALSERVICE_OUTPUT_DIR="+output, "LOCALSERVICE_GIT_COMMIT="+j.Commit)
-	fmt.Fprintf(log, "源码 %s\n执行 /bin/bash %s\n", j.Commit, j.Script)
-	e = runProcess(ctx, s.Path, log, env, "/bin/bash", j.Script)
-	if e != nil {
-		finish("failed", "脚本失败或任务超时；已上传的包会保留，请查看日志")
-		return
-	}
-	a.buildMu.Lock()
-	count := len(a.buildReceipts[j.ID])
-	a.buildMu.Unlock()
-	if count == 0 {
-		finish("failed", "脚本退出成功，但未收到带本任务 job_id 的发布记录；请按规范调用 push.sh")
-		return
-	}
-	j.Stage = "complete"
-	finish("succeeded", "")
+	a.buildMu.Lock(); count:=len(a.buildReceipts[j.ID]); a.buildMu.Unlock()
+	if count==0 { finish("failed","构建命令退出成功，但没有收到与本任务关联的发布记录"); return }
+	j.Stage="complete"; finish("succeeded","")
 }
 func (a *App) ConfigureBuildRunner(origin, root string) error {
 	u, e := url.Parse(origin)
