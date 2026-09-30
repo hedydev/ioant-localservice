@@ -1,16 +1,43 @@
 # ILS Release Profiles
 
-ILS Release Profiles let the local service build and publish another local project without requiring that project to carry a release script.
+ILS Release Profiles let ILS orchestrate builds from an existing local Git checkout while keeping machine-specific configuration in ILS rather than the business repository.
+
+## Preferred Apple build contract
+
+New Apple projects should expose package/submission-only entrypoints:
+
+```text
+scripts/ils-build-macos.sh
+scripts/ils-build-ios.sh
+```
+
+The preferred Release Profile uses:
+
+```json
+{
+  "result_contract": "ils-result-v1"
+}
+```
+
+The project script writes its machine-readable outcome to:
+
+```text
+$ILS_OUTPUT_DIR/ils-result.json
+```
+
+ILS owns Git readiness, task state, local artifact publication, logs and TestFlight submission feedback. The project script owns compile/sign/archive/export/package validation. It must not switch/stash/reset/clean/commit/push Git, install or launch the app, read the ILS administrator token, or call the ILS publication API.
+
+The reusable cross-project rules live in Hero Skills `standards/apple-release-build-contract.md`.
 
 ## Ownership
 
-Profiles are owned by ILS and stored under:
+Profiles are stored under:
 
 ```text
 .localservice/release-profiles/<project>/<profile>.json
 ```
 
-The business repository is not modified when a profile is created, edited, run, or deleted.
+Creating, editing, running or deleting a profile does not write configuration into the linked business repository.
 
 ## Required project state
 
@@ -21,7 +48,7 @@ Before every build ILS verifies:
 - the worktree is clean;
 - an upstream exists.
 
-ILS then runs `git pull --ff-only` with Git hooks and autostash disabled. It does not switch branches, stash, reset, or resolve conflicts.
+ILS then runs `git pull --ff-only` with Git hooks and autostash disabled. It does not switch branches, stash, reset, clean, rebase, or resolve conflicts.
 
 ## Profile fields
 
@@ -30,21 +57,23 @@ ILS then runs `git pull --ff-only` with Git hooks and autostash disabled. It doe
 | `id` | Stable lowercase profile ID |
 | `name` | Display name |
 | `platform` | `ios` or `macos` |
-| `architecture` | `arm64`, `x86_64`, or `universal` |
+| `architecture` | `arm64`, `x86_64`, or `universal`; iOS must be arm64 |
 | `channel` | `dev`, `beta`, or `stable` |
-| `variant` | Stable package identity, such as `default` or `desktop-dmg` |
-| `build_command` | Shell command executed in the linked project directory |
-| `package_command` | Optional second shell command |
-| `artifact` | Relative artifact path, unique glob, or path under `$ILS_OUTPUT_DIR` |
-| `version_command` | macOS only: command that prints one SemVer value |
-| `build_number_command` | macOS only: command that prints one positive integer |
-| `notes` | Default release notes |
+| `variant` | Stable package identity |
+| `lane` | `ios-adhoc`, `ios-testflight`, `macos-test`, or `macos-release` |
+| `result_contract` | Preferred: `ils-result-v1`; empty keeps legacy artifact-field behavior |
+| `build_command` | Shell command executed from the linked project directory |
+| `package_command` | Optional second command |
+| `artifact` | Legacy mode only: relative artifact path/glob or path under `$ILS_OUTPUT_DIR` |
+| `version_command` | Legacy macOS mode only |
+| `build_number_command` | Legacy macOS mode only |
+| `notes` | Default ILS release notes |
 
-For iOS, version and build are read from the IPA. The normal upload checks still verify that the values match the IPA metadata.
+TestFlight profiles must use `ils-result-v1`.
 
-## Execution environment
+## Standard execution environment
 
-ILS exports:
+ILS exports the existing compatibility variables plus these preferred values:
 
 ```text
 ILS_URL
@@ -54,14 +83,153 @@ ILS_PROJECT_ID
 ILS_JOB_ID
 ILS_OUTPUT_DIR
 ILS_GIT_COMMIT
+ILS_PLATFORM
+ILS_CHANNEL
+ILS_ARCHITECTURE
+ILS_VARIANT
+ILS_LANE
 ```
 
-The older `LOCALSERVICE_*` aliases are exported as well for compatibility.
+The standard project script must place final release evidence beneath `ILS_OUTPUT_DIR`. Large compiler/package caches may remain in the project's configured development cache.
 
-The profile commands run with the linked project directory as `cwd`. `ILS_OUTPUT_DIR` is a task-specific directory managed by ILS and is useful when the business project should not retain packaged artifacts.
+## Structured task progress
 
-## Publishing
+Project scripts may emit a line beginning with `ILS_EVENT ` followed by one JSON object:
 
-After the configured commands succeed, ILS resolves exactly one artifact and publishes it through `scripts/push.sh`. The job succeeds only if at least one release record is associated with the build job.
+```text
+ILS_EVENT {"stage":"archive","state":"started","message":"Creating Release archive"}
+ILS_EVENT {"stage":"upload","state":"started","message":"Uploading to App Store Connect"}
+ILS_EVENT {"stage":"upload","state":"succeeded"}
+ILS_EVENT {"stage":"submitted","state":"succeeded","message":"Upload accepted"}
+```
 
-Project-owned `release*.sh` scripts remain available for repositories that intentionally keep their release process in source control, but they are no longer required for ILS-managed distribution.
+ILS stores the latest valid stage/state/message on the build job and the management page refreshes it with the live log.
+
+A numeric `progress` field from 0 to 100 is accepted only when the project tool has real progress evidence. Project scripts must not fabricate percentages from elapsed time.
+
+## ils-result-v1: local artifact
+
+Example Ad Hoc result:
+
+```json
+{
+  "schema_version": 1,
+  "lane": "ios-adhoc",
+  "status": "succeeded",
+  "platform": "ios",
+  "artifact": "/absolute/path/under/ILS_OUTPUT_DIR/App.ipa",
+  "version": "1.2.0",
+  "build": "123",
+  "architecture": "arm64",
+  "bundle_id": "com.example.app",
+  "distribution": "release-testing",
+  "sha256": "..."
+}
+```
+
+ILS verifies:
+
+- profile platform/architecture/lane matches the result;
+- version is valid SemVer and build is a positive integer;
+- artifact resolves to a regular file **inside** `ILS_OUTPUT_DIR`;
+- extension matches the platform;
+- provided SHA-256 matches the file;
+- for iOS, IPA version/build/Bundle ID match the result.
+
+After validation ILS invokes its own immutable release publication path. The project script does not call `push.sh`.
+
+## ils-result-v1: TestFlight
+
+Example:
+
+```json
+{
+  "schema_version": 1,
+  "lane": "ios-testflight",
+  "status": "submitted",
+  "platform": "ios",
+  "version": "1.2.0",
+  "build": "123",
+  "architecture": "arm64",
+  "bundle_id": "com.example.app",
+  "distribution": "app-store-connect",
+  "archive": "/absolute/job/output/App.xcarchive",
+  "submission_result": "upload-succeeded"
+}
+```
+
+For this lane ILS requires an explicit successful App Store Connect submission result and **does not create a fake local release record**.
+
+The job UI reports the upload as submitted. This is intentionally different from “TestFlight available”: App Store Connect may still be processing the build. ILS may show `processing` or `available` only when a future/connected Apple status source provides evidence.
+
+## Recommended profiles
+
+iOS Ad Hoc:
+
+```json
+{
+  "id": "ios-adhoc",
+  "name": "iOS Ad Hoc",
+  "platform": "ios",
+  "architecture": "arm64",
+  "channel": "dev",
+  "variant": "default",
+  "lane": "ios-adhoc",
+  "result_contract": "ils-result-v1",
+  "build_command": "bash scripts/ils-build-ios.sh --adhoc"
+}
+```
+
+iOS TestFlight:
+
+```json
+{
+  "id": "ios-testflight",
+  "name": "iOS TestFlight",
+  "platform": "ios",
+  "architecture": "arm64",
+  "channel": "beta",
+  "variant": "default",
+  "lane": "ios-testflight",
+  "result_contract": "ils-result-v1",
+  "build_command": "bash scripts/ils-build-ios.sh --testflight"
+}
+```
+
+macOS internal distribution:
+
+```json
+{
+  "id": "macos-test",
+  "name": "macOS Test DMG",
+  "platform": "macos",
+  "architecture": "arm64",
+  "channel": "dev",
+  "variant": "desktop-dmg",
+  "lane": "macos-test",
+  "result_contract": "ils-result-v1",
+  "build_command": "bash scripts/ils-build-macos.sh --test"
+}
+```
+
+macOS public direct distribution:
+
+```json
+{
+  "id": "macos-release",
+  "name": "macOS Release DMG",
+  "platform": "macos",
+  "architecture": "arm64",
+  "channel": "stable",
+  "variant": "desktop-dmg",
+  "lane": "macos-release",
+  "result_contract": "ils-result-v1",
+  "build_command": "bash scripts/ils-build-macos.sh --release"
+}
+```
+
+## Legacy compatibility
+
+Profiles with empty `result_contract` continue using the older `artifact` field and, for macOS, `version_command` / `build_number_command`.
+
+Project-owned `release*.sh` scripts that self-publish also remain available as a compatibility runner. New Apple integrations should prefer Release Profiles plus `ils-result-v1`.

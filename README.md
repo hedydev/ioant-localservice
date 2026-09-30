@@ -17,48 +17,96 @@ The default data directory is `.localservice/`. Use `-data /absolute/path` to ch
 
 ## Build and publish from local project directories
 
-ILS can link a project to its existing Git working directory on the Mac. The project remains in its original location; ILS stores orchestration configuration in its own data directory and executes build commands with the project directory as the working directory.
+ILS can link a project to its existing Git working directory on the Mac. The project remains in its original location; ILS stores orchestration configuration in its own data directory and executes release commands with the project directory as the working directory.
 
-The preferred configuration is an **ILS Release Profile**. A profile stores:
+For new Apple integrations, the preferred boundary is the **Apple Release Build Contract**:
 
-- build command and optional package command;
-- artifact path or a unique artifact glob;
-- platform, architecture, channel, and variant;
-- default release notes;
-- for macOS, commands that return the SemVer version and positive integer build number.
+~~~text
+ILS
+├─ verifies branch / clean worktree / upstream
+├─ pulls with git pull --ff-only
+├─ creates a job/output directory
+├─ runs the project package/submission entrypoint
+├─ shows live logs and structured progress
+├─ validates the result
+├─ publishes local artifacts
+└─ records TestFlight submission feedback
 
-For iOS profiles, ILS reads the version and build number directly from the generated IPA and verifies them again during upload. Profile data is stored under `.localservice/release-profiles/<project>/` and is not written into the business repository.
+project
+├─ scripts/ils-build-macos.sh
+└─ scripts/ils-build-ios.sh
+~~~
 
-A typical workflow is:
+The product scripts compile, sign, archive/export/package and validate. They do **not** switch/stash/reset/clean/commit/push Git, install or launch the app, read the ILS administrator token, or call the ILS release API.
 
-1. Link the project directory and expected branch.
-2. Create a Release Profile from the ILS page.
-3. ILS verifies a clean working tree and configured upstream.
-4. ILS runs `git pull --ff-only` without switching branches, stashing, resetting, or running Git hooks.
-5. ILS runs the configured build and package commands in the project's working directory.
-6. ILS resolves exactly one artifact, determines version/build metadata, and publishes it through its own release API.
-7. Build logs, task state, and release IDs remain in ILS.
-
-Example profile:
+Preferred Release Profiles set:
 
 ~~~json
 {
-  "id": "ios-dev",
-  "name": "iOS Dev",
+  "result_contract": "ils-result-v1"
+}
+~~~
+
+and the project writes:
+
+~~~text
+$ILS_OUTPUT_DIR/ils-result.json
+~~~
+
+ILS Release Profile lanes are:
+
+- `macos-test` — internal/test Mac distribution;
+- `macos-release` — public direct distribution, normally Developer ID + notarization;
+- `ios-adhoc` — Release archive + `release-testing` export, then immutable ILS IPA publication;
+- `ios-testflight` — Release archive + App Store Connect upload, with ILS task/log/result tracking.
+
+Example iOS Ad Hoc profile:
+
+~~~json
+{
+  "id": "ios-adhoc",
+  "name": "iOS Ad Hoc",
   "platform": "ios",
   "architecture": "arm64",
   "channel": "dev",
   "variant": "default",
-  "build_command": "./scripts/build_ios.sh --archive-only",
-  "package_command": "./scripts/package_ios.sh",
-  "artifact": "$ILS_OUTPUT_DIR/Sowhat.ipa",
-  "notes": "Development build published by ILS"
+  "lane": "ios-adhoc",
+  "result_contract": "ils-result-v1",
+  "build_command": "bash scripts/ils-build-ios.sh --adhoc"
 }
 ~~~
 
-Existing project-owned `release*.sh` scripts remain supported as a compatibility mode. ILS discovers tracked scripts in the repository root or `scripts/` and their matching Markdown documentation. New projects do not need to add release scripts merely to use ILS.
+Example TestFlight profile:
 
-See [RELEASE_PROFILES.md](docs/RELEASE_PROFILES.md) for the ILS-owned profile model and [RELEASE_SCRIPTS.md](docs/RELEASE_SCRIPTS.md) for the legacy project-script contract.
+~~~json
+{
+  "id": "ios-testflight",
+  "name": "iOS TestFlight",
+  "platform": "ios",
+  "architecture": "arm64",
+  "channel": "beta",
+  "variant": "default",
+  "lane": "ios-testflight",
+  "result_contract": "ils-result-v1",
+  "build_command": "bash scripts/ils-build-ios.sh --testflight"
+}
+~~~
+
+Project scripts can emit machine-readable progress while keeping normal stdout/stderr as the full log:
+
+~~~text
+ILS_EVENT {"stage":"archive","state":"started"}
+ILS_EVENT {"stage":"upload","state":"started","message":"Uploading to App Store Connect"}
+ILS_EVENT {"stage":"submitted","state":"succeeded","message":"Upload accepted"}
+~~~
+
+An optional numeric `progress` is shown only when the underlying tool provides trustworthy progress. ILS does not invent percentages from elapsed time.
+
+For a local artifact lane, ILS validates the result file and artifact, then publishes through its own release API. For TestFlight, ILS stores the submitted result without creating a fake local IPA release. **App Store Connect upload acceptance is not the same as TestFlight processing completion or tester availability.**
+
+Existing legacy Release Profiles using `artifact`, `version_command`, and `build_number_command`, plus project-owned self-publishing `release*.sh` scripts, remain supported for compatibility.
+
+See [RELEASE_PROFILES.md](docs/RELEASE_PROFILES.md) for the preferred profile/result contract and [RELEASE_SCRIPTS.md](docs/RELEASE_SCRIPTS.md) for the legacy project-script runner.
 
 ## iOS: signing versus device trust
 

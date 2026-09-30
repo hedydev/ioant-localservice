@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,9 +37,11 @@ type ReleaseProfile struct {
 	Architecture       string `json:"architecture"`
 	Channel            string `json:"channel"`
 	Variant            string `json:"variant"`
+	Lane               string `json:"lane,omitempty"`
+	ResultContract     string `json:"result_contract,omitempty"`
 	BuildCommand       string `json:"build_command"`
 	PackageCommand     string `json:"package_command,omitempty"`
-	Artifact           string `json:"artifact"`
+	Artifact           string `json:"artifact,omitempty"`
 	VersionCommand     string `json:"version_command,omitempty"`
 	BuildNumberCommand string `json:"build_number_command,omitempty"`
 	Notes              string `json:"notes,omitempty"`
@@ -54,19 +57,46 @@ type SourceInfo struct {
 	Scripts       []ReleaseScript `json:"scripts"`
 }
 type BuildJob struct {
-	ID         string     `json:"id"`
-	ProjectID  string     `json:"project_id"`
-	Mode       string     `json:"mode,omitempty"`
-	Script     string     `json:"script,omitempty"`
-	ProfileID  string     `json:"profile_id,omitempty"`
-	Title      string     `json:"title,omitempty"`
-	Status     string     `json:"status"`
-	Stage      string     `json:"stage"`
-	Error      string     `json:"error,omitempty"`
-	Commit     string     `json:"commit,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	ReleaseIDs []string   `json:"release_ids"`
+	ID         string       `json:"id"`
+	ProjectID  string       `json:"project_id"`
+	Mode       string       `json:"mode,omitempty"`
+	Script     string       `json:"script,omitempty"`
+	ProfileID  string       `json:"profile_id,omitempty"`
+	Title      string       `json:"title,omitempty"`
+	Status     string       `json:"status"`
+	Stage      string       `json:"stage"`
+	StageState string       `json:"stage_state,omitempty"`
+	Progress   *int         `json:"progress,omitempty"`
+	Message    string       `json:"message,omitempty"`
+	Error      string       `json:"error,omitempty"`
+	Commit     string       `json:"commit,omitempty"`
+	CreatedAt  time.Time    `json:"created_at"`
+	FinishedAt *time.Time   `json:"finished_at,omitempty"`
+	ReleaseIDs []string     `json:"release_ids"`
+	Result     *BuildResult `json:"result,omitempty"`
+}
+
+type BuildEvent struct {
+	Stage    string `json:"stage"`
+	State    string `json:"state"`
+	Message  string `json:"message,omitempty"`
+	Progress *int   `json:"progress,omitempty"`
+}
+
+type BuildResult struct {
+	SchemaVersion     int    `json:"schema_version"`
+	Lane              string `json:"lane"`
+	Status            string `json:"status"`
+	Platform          string `json:"platform"`
+	Artifact          string `json:"artifact,omitempty"`
+	Version           string `json:"version"`
+	Build             string `json:"build"`
+	Architecture      string `json:"architecture"`
+	BundleID          string `json:"bundle_id,omitempty"`
+	Distribution      string `json:"distribution"`
+	SHA256            string `json:"sha256,omitempty"`
+	Archive           string `json:"archive,omitempty"`
+	SubmissionResult  string `json:"submission_result,omitempty"`
 }
 
 var releaseScriptRE = regexp.MustCompile(`^(scripts/)?release[A-Za-z0-9_-]*\.sh$`)
@@ -220,6 +250,8 @@ func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
 	p.Architecture = strings.TrimSpace(p.Architecture)
 	p.Channel = strings.TrimSpace(p.Channel)
 	p.Variant = strings.TrimSpace(p.Variant)
+	p.Lane = strings.TrimSpace(p.Lane)
+	p.ResultContract = strings.TrimSpace(p.ResultContract)
 	p.BuildCommand = strings.TrimSpace(p.BuildCommand)
 	p.PackageCommand = strings.TrimSpace(p.PackageCommand)
 	p.Artifact = strings.TrimSpace(p.Artifact)
@@ -227,6 +259,9 @@ func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
 	p.BuildNumberCommand = strings.TrimSpace(p.BuildNumberCommand)
 	if p.Channel == "" { p.Channel = "dev" }
 	if p.Variant == "" { p.Variant = "default" }
+	if p.Lane == "" {
+		if p.Platform == "ios" { p.Lane = "ios-adhoc" } else { p.Lane = "macos-test" }
+	}
 	if p.Architecture == "" {
 		if p.Platform == "ios" { p.Architecture = "arm64" } else { p.Architecture = "universal" }
 	}
@@ -237,18 +272,35 @@ func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
 		return p, fmt.Errorf("平台、架构或渠道无效")
 	}
 	if !slugRE.MatchString(p.Variant) { return p, fmt.Errorf("variant 必须是小写字母、数字或连字符") }
-	if p.BuildCommand == "" || len(p.BuildCommand) > 32768 || len(p.PackageCommand) > 32768 || p.Artifact == "" || len(p.Artifact) > 2048 {
-		return p, fmt.Errorf("需要有效的构建命令和产物路径")
+	if p.Platform == "ios" && !oneOf(p.Lane, "ios-adhoc", "ios-testflight") {
+		return p, fmt.Errorf("iOS lane 必须是 ios-adhoc 或 ios-testflight")
 	}
-	if strings.ContainsRune(p.Artifact, 0) || filepath.IsAbs(p.Artifact) {
-		return p, fmt.Errorf("产物路径必须相对项目目录，或使用 ILS_OUTPUT_DIR")
+	if p.Platform == "macos" && !oneOf(p.Lane, "macos-test", "macos-release") {
+		return p, fmt.Errorf("macOS lane 必须是 macos-test 或 macos-release")
 	}
-	cleanArtifact := filepath.Clean(p.Artifact)
-	if strings.HasPrefix(cleanArtifact, ".."+string(filepath.Separator)) || cleanArtifact == ".." {
-		return p, fmt.Errorf("产物路径不能逃离项目目录；需要外部产物时使用 ILS_OUTPUT_DIR")
+	if p.ResultContract != "" && p.ResultContract != "ils-result-v1" {
+		return p, fmt.Errorf("result_contract 仅支持 ils-result-v1")
 	}
-	if p.Platform == "macos" && (p.VersionCommand == "" || p.BuildNumberCommand == "") {
-		return p, fmt.Errorf("macOS Profile 需要 version command 与 build number command")
+	if p.Lane == "ios-testflight" && p.ResultContract != "ils-result-v1" {
+		return p, fmt.Errorf("TestFlight Profile 必须使用 ils-result-v1")
+	}
+	if p.BuildCommand == "" || len(p.BuildCommand) > 32768 || len(p.PackageCommand) > 32768 {
+		return p, fmt.Errorf("需要有效的构建命令")
+	}
+	if p.ResultContract == "" {
+		if p.Artifact == "" || len(p.Artifact) > 2048 {
+			return p, fmt.Errorf("兼容 Profile 需要有效的产物路径")
+		}
+		if strings.ContainsRune(p.Artifact, 0) || filepath.IsAbs(p.Artifact) {
+			return p, fmt.Errorf("产物路径必须相对项目目录，或使用 ILS_OUTPUT_DIR")
+		}
+		cleanArtifact := filepath.Clean(p.Artifact)
+		if strings.HasPrefix(cleanArtifact, ".."+string(filepath.Separator)) || cleanArtifact == ".." {
+			return p, fmt.Errorf("产物路径不能逃离项目目录；需要外部产物时使用 ILS_OUTPUT_DIR")
+		}
+		if p.Platform == "macos" && (p.VersionCommand == "" || p.BuildNumberCommand == "") {
+			return p, fmt.Errorf("兼容 macOS Profile 需要 version command 与 build number command")
+		}
 	}
 	if len(p.VersionCommand) > 8192 || len(p.BuildNumberCommand) > 8192 || len(p.Notes) > 16000 {
 		return p, fmt.Errorf("Profile 字段过长")
@@ -506,6 +558,183 @@ func (a *App) buildLog(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]string{"log": strings.ReplaceAll(string(b), a.token, "[REDACTED]")})
 }
 
+
+var buildEventStages = map[string]bool{
+	"preflight": true, "pull": true, "build": true, "archive": true, "validate": true,
+	"export": true, "package": true, "notarize": true, "upload": true,
+	"submitted": true, "processing": true, "complete": true,
+}
+var buildEventStates = map[string]bool{
+	"queued": true, "started": true, "running": true, "succeeded": true, "failed": true,
+}
+
+type eventLog struct {
+	dst     io.Writer
+	mu      sync.Mutex
+	pending string
+	secret  string
+	onEvent func(BuildEvent)
+}
+
+func (l *eventLog) Write(p []byte) (int, error) {
+	if _, e := l.dst.Write(p); e != nil {
+		return 0, e
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pending += string(p)
+	for {
+		i := strings.IndexByte(l.pending, '\n')
+		if i < 0 {
+			if len(l.pending) > 64<<10 {
+				l.pending = l.pending[len(l.pending)-(64<<10):]
+			}
+			break
+		}
+		line := strings.TrimSpace(l.pending[:i])
+		l.pending = l.pending[i+1:]
+		if !strings.HasPrefix(line, "ILS_EVENT ") {
+			continue
+		}
+		raw := strings.TrimSpace(strings.TrimPrefix(line, "ILS_EVENT "))
+		if len(raw) == 0 || len(raw) > 16<<10 {
+			continue
+		}
+		var ev BuildEvent
+		dec := json.NewDecoder(strings.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if dec.Decode(&ev) != nil || !buildEventStages[ev.Stage] || !buildEventStates[ev.State] {
+			continue
+		}
+		if ev.Progress != nil && (*ev.Progress < 0 || *ev.Progress > 100) {
+			continue
+		}
+		ev.Message = strings.ReplaceAll(ev.Message, l.secret, "[REDACTED]")
+		if len(ev.Message) > 1000 {
+			ev.Message = ev.Message[:1000]
+		}
+		if l.onEvent != nil {
+			l.onEvent(ev)
+		}
+	}
+	return len(p), nil
+}
+
+func readBuildResult(output string) (BuildResult, error) {
+	var result BuildResult
+	path := filepath.Join(output, "ils-result.json")
+	b, e := os.ReadFile(path)
+	if e != nil {
+		return result, fmt.Errorf("缺少 ILS_OUTPUT_DIR/ils-result.json")
+	}
+	if len(b) > 64<<10 {
+		return result, fmt.Errorf("ils-result.json 超过 64 KiB")
+	}
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	if e = dec.Decode(&result); e != nil {
+		return result, fmt.Errorf("ils-result.json 格式无效：%v", e)
+	}
+	if result.SchemaVersion != 1 {
+		return result, fmt.Errorf("ils-result.json schema_version 必须为 1")
+	}
+	return result, nil
+}
+
+func outputArtifact(output, path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("ils-result.json 缺少 artifact")
+	}
+	candidate := path
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(output, filepath.FromSlash(candidate))
+	}
+	outputReal, e := filepath.EvalSymlinks(output)
+	if e != nil {
+		return "", fmt.Errorf("无法解析 ILS_OUTPUT_DIR")
+	}
+	real, e := filepath.EvalSymlinks(candidate)
+	if e != nil {
+		return "", fmt.Errorf("找不到结果产物")
+	}
+	rel, e := filepath.Rel(outputReal, real)
+	if e != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("结果产物必须位于 ILS_OUTPUT_DIR 内")
+	}
+	info, e := os.Stat(real)
+	if e != nil || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("结果产物不是普通文件")
+	}
+	return real, nil
+}
+
+func fileSHA256(path string) (string, error) {
+	f, e := os.Open(path)
+	if e != nil {
+		return "", e
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, e = io.Copy(h, f); e != nil {
+		return "", e
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+func validateContractResult(profile ReleaseProfile, result BuildResult, output string) (string, error) {
+	if result.Platform != profile.Platform || result.Architecture != profile.Architecture || result.Lane != profile.Lane {
+		return "", fmt.Errorf("ils-result.json 与 Profile 的 platform / architecture / lane 不一致")
+	}
+	if !validVersion(result.Version) {
+		return "", fmt.Errorf("ils-result.json version 不是有效 SemVer")
+	}
+	if _, e := parseBuild(result.Build); e != nil {
+		return "", fmt.Errorf("ils-result.json build 必须是正整数")
+	}
+	if profile.Lane == "ios-testflight" {
+		if result.Status != "submitted" || result.Distribution != "app-store-connect" || result.SubmissionResult != "upload-succeeded" {
+			return "", fmt.Errorf("TestFlight 结果必须明确为 submitted + app-store-connect + upload-succeeded")
+		}
+		if result.Artifact != "" {
+			return "", fmt.Errorf("TestFlight 结果不应伪造本地发布 artifact")
+		}
+		return "", nil
+	}
+	if result.Status != "succeeded" {
+		return "", fmt.Errorf("本地安装包结果 status 必须为 succeeded")
+	}
+	artifact, e := outputArtifact(output, result.Artifact)
+	if e != nil {
+		return "", e
+	}
+	ext := strings.ToLower(filepath.Ext(artifact))
+	if (profile.Platform == "ios" && ext != ".ipa") || (profile.Platform == "macos" && !oneOf(ext, ".dmg", ".pkg", ".zip")) {
+		return "", fmt.Errorf("ils-result.json 产物类型与平台不匹配")
+	}
+	if result.SHA256 != "" {
+		actual, e := fileSHA256(artifact)
+		if e != nil {
+			return "", fmt.Errorf("无法计算结果产物 SHA-256")
+		}
+		if !strings.EqualFold(result.SHA256, actual) {
+			return "", fmt.Errorf("ils-result.json SHA-256 与实际产物不一致")
+		}
+	}
+	if profile.Platform == "ios" {
+		ipa, e := inspectIPA(artifact)
+		if e != nil {
+			return "", fmt.Errorf("IPA 检查失败：%v", e)
+		}
+		if ipa.Version != result.Version || ipa.Build != result.Build {
+			return "", fmt.Errorf("ils-result.json version/build 与 IPA 不一致")
+		}
+		if result.BundleID != "" && ipa.BundleID != result.BundleID {
+			return "", fmt.Errorf("ils-result.json bundle_id 与 IPA 不一致")
+		}
+	}
+	return artifact, nil
+}
+
 // Bound disk use while continuing to drain process output.
 type cappedLog struct {
 	mu      sync.Mutex
@@ -633,43 +862,78 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 		"LOCALSERVICE_PROJECT_ID="+j.ProjectID,"LOCALSERVICE_JOB_ID="+j.ID,"LOCALSERVICE_OUTPUT_DIR="+output,"LOCALSERVICE_GIT_COMMIT="+j.Commit,
 		"ILS_URL="+a.buildOrigin,"ILS_TOKEN_FILE="+tokenFile,"ILS_ROOT="+a.buildRoot,"ILS_PROJECT_ID="+j.ProjectID,
 		"ILS_JOB_ID="+j.ID,"ILS_OUTPUT_DIR="+output,"ILS_GIT_COMMIT="+j.Commit)
+	var progressMu sync.Mutex
+	jobLog:=&eventLog{dst:log,secret:a.token,onEvent:func(ev BuildEvent){
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		j.Stage=ev.Stage
+		j.StageState=ev.State
+		j.Progress=ev.Progress
+		j.Message=ev.Message
+		_=a.writeBuild(j)
+	}}
+	if profile!=nil {
+		env=append(env,
+			"ILS_PLATFORM="+profile.Platform,
+			"ILS_CHANNEL="+profile.Channel,
+			"ILS_ARCHITECTURE="+profile.Architecture,
+			"ILS_VARIANT="+profile.Variant,
+			"ILS_LANE="+profile.Lane)
+	}
 	if profile==nil {
 		j.Stage="script"; _=a.writeBuild(j)
 		fmt.Fprintf(log,"Source %s\nRun project script: /bin/bash %s\n",j.Commit,j.Script)
-		if e=runProcess(ctx,source.Path,log,env,"/bin/bash",j.Script); e!=nil { finish("failed","项目发布脚本失败或任务超时；已上传的包会保留，请查看日志"); return }
+		if e=runProcess(ctx,source.Path,jobLog,env,"/bin/bash",j.Script); e!=nil { finish("failed","项目发布脚本失败或任务超时；已上传的包会保留，请查看日志"); return }
 	} else {
 		j.Stage="build"; _=a.writeBuild(j)
 		fmt.Fprintf(log,"Source %s\nILS Release Profile: %s (%s)\n",j.Commit,profile.Name,profile.ID)
-		if e=runProcess(ctx,source.Path,log,env,"/bin/bash","-lc",profile.BuildCommand); e!=nil { finish("failed","ILS Build Command 失败或任务超时；详情见日志"); return }
+		if e=runProcess(ctx,source.Path,jobLog,env,"/bin/bash","-lc",profile.BuildCommand); e!=nil { finish("failed","ILS Build Command 失败或任务超时；详情见日志"); return }
 		if profile.PackageCommand!="" {
 			j.Stage="package"; _=a.writeBuild(j)
-			if e=runProcess(ctx,source.Path,log,env,"/bin/bash","-lc",profile.PackageCommand); e!=nil { finish("failed","ILS Package Command 失败或任务超时；详情见日志"); return }
+			if e=runProcess(ctx,source.Path,jobLog,env,"/bin/bash","-lc",profile.PackageCommand); e!=nil { finish("failed","ILS Package Command 失败或任务超时；详情见日志"); return }
 		}
-		artifact,e:=resolveProfileArtifact(source.Path,output,profile.Artifact)
-		if e!=nil { finish("failed",e.Error()); return }
-		ext:=strings.ToLower(filepath.Ext(artifact))
-		if (profile.Platform=="ios"&&ext!=".ipa") || (profile.Platform=="macos"&&!oneOf(ext,".dmg",".pkg",".zip")) { finish("failed","Profile 产物类型与平台不匹配"); return }
-		var version,build string
-		if profile.Platform=="ios" {
-			ipa,e:=inspectIPA(artifact); if e!=nil { finish("failed","IPA 检查失败："+e.Error()); return }
-			version,build=ipa.Version,ipa.Build
+		var artifact,version,build string
+		if profile.ResultContract=="ils-result-v1" {
+			j.Stage="validate"; j.StageState="running"; j.Progress=nil; _=a.writeBuild(j)
+			result,resultErr:=readBuildResult(output)
+			if resultErr!=nil { finish("failed",resultErr.Error()); return }
+			artifact,resultErr=validateContractResult(*profile,result,output)
+			if resultErr!=nil { finish("failed",resultErr.Error()); return }
+			j.Result=&result
+			version,build=result.Version,result.Build
+			_=a.writeBuild(j)
+			if profile.Lane=="ios-testflight" {
+				j.Stage="complete"; j.StageState="succeeded"; j.Progress=nil
+				if j.Message=="" { j.Message="App Store Connect 已接受上传；等待 Apple 处理" }
+				finish("succeeded","")
+				return
+			}
 		} else {
-			j.Stage="metadata"; _=a.writeBuild(j)
-			version,e=runValueCommand(ctx,source.Path,log,env,profile.VersionCommand); if e!=nil { finish("failed","无法读取 macOS version："+e.Error()); return }
-			build,e=runValueCommand(ctx,source.Path,log,env,profile.BuildNumberCommand); if e!=nil { finish("failed","无法读取 macOS build number："+e.Error()); return }
+			artifact,e=resolveProfileArtifact(source.Path,output,profile.Artifact)
+			if e!=nil { finish("failed",e.Error()); return }
+			ext:=strings.ToLower(filepath.Ext(artifact))
+			if (profile.Platform=="ios"&&ext!=".ipa") || (profile.Platform=="macos"&&!oneOf(ext,".dmg",".pkg",".zip")) { finish("failed","Profile 产物类型与平台不匹配"); return }
+			if profile.Platform=="ios" {
+				ipa,inspectErr:=inspectIPA(artifact); if inspectErr!=nil { finish("failed","IPA 检查失败："+inspectErr.Error()); return }
+				version,build=ipa.Version,ipa.Build
+			} else {
+				j.Stage="metadata"; _=a.writeBuild(j)
+				version,e=runValueCommand(ctx,source.Path,log,env,profile.VersionCommand); if e!=nil { finish("failed","无法读取 macOS version："+e.Error()); return }
+				build,e=runValueCommand(ctx,source.Path,log,env,profile.BuildNumberCommand); if e!=nil { finish("failed","无法读取 macOS build number："+e.Error()); return }
+			}
+			if !validVersion(version) { finish("failed","Profile 解析出的 version 不是有效 SemVer"); return }
+			if _,e=parseBuild(build); e!=nil { finish("failed","Profile 解析出的 build number 必须是正整数"); return }
 		}
-		if !validVersion(version) { finish("failed","Profile 解析出的 version 不是有效 SemVer"); return }
-		if _,e=parseBuild(build); e!=nil { finish("failed","Profile 解析出的 build number 必须是正整数"); return }
-		j.Stage="publish"; _=a.writeBuild(j)
+		j.Stage="publish"; j.StageState="running"; j.Progress=nil; _=a.writeBuild(j)
 		push:=filepath.Join(a.buildRoot,"scripts","push.sh")
 		if stat,statErr:=os.Stat(push); statErr!=nil || !stat.Mode().IsRegular() { finish("failed","ILS scripts/push.sh 不可用"); return }
 		profileEnv:=append(env,"RELEASE_NOTES="+profile.Notes)
 		fmt.Fprintf(log,"Publish %s version %s build %s\n",filepath.Base(artifact),version,build)
-		if e=runProcess(ctx,source.Path,log,profileEnv,"/bin/bash",push,j.ProjectID,version,build,profile.Platform,artifact,profile.Channel,profile.Architecture,profile.Variant); e!=nil { finish("failed","ILS 发布失败；详情见日志"); return }
+		if e=runProcess(ctx,source.Path,jobLog,profileEnv,"/bin/bash",push,j.ProjectID,version,build,profile.Platform,artifact,profile.Channel,profile.Architecture,profile.Variant); e!=nil { finish("failed","ILS 发布失败；详情见日志"); return }
 	}
 	a.buildMu.Lock(); count:=len(a.buildReceipts[j.ID]); a.buildMu.Unlock()
 	if count==0 { finish("failed","构建命令退出成功，但没有收到与本任务关联的发布记录"); return }
-	j.Stage="complete"; finish("succeeded","")
+	j.Stage="complete"; j.StageState="succeeded"; j.Progress=nil; finish("succeeded","")
 }
 func (a *App) ConfigureBuildRunner(origin, root string) error {
 	u, e := url.Parse(origin)

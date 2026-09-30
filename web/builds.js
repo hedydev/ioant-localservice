@@ -18,8 +18,15 @@ function releaseMarkdown(markdown) {
 let buildProject=null, activeLog=null, buildLoading=false, buildSourceState=null, releaseProfiles=[];
 
 function profileSummary(p){
- const metadata=p.platform==='ios'?'version/build 自动读取 IPA':`version: ${p.version_command} · build: ${p.build_number_command}`;
- return `${p.platform==='ios'?'iOS':'macOS'} · ${escape(p.architecture)} · ${escape(p.channel)} · ${escape(p.variant)}<br>${escape(metadata)}<br>产物：${escape(p.artifact)}`;
+ const standard=p.result_contract==='ils-result-v1';
+ const lane=p.lane||(p.platform==='ios'?'ios-adhoc':'macos-test');
+ const metadata=standard
+  ? `标准契约 · ${lane}`
+  : (p.platform==='ios'?'兼容模式：version/build 自动读取 IPA':`兼容模式 · version: ${p.version_command} · build: ${p.build_number_command}`);
+ const output=standard
+  ? (lane==='ios-testflight'?'App Store Connect / TestFlight submission':'由 ILS_OUTPUT_DIR/ils-result.json 返回最终产物')
+  : `产物：${p.artifact}`;
+ return `${p.platform==='ios'?'iOS':'macOS'} · ${escape(p.architecture)} · ${escape(p.channel)} · ${escape(p.variant)}<br>${escape(metadata)}<br>${escape(output)}`;
 }
 function renderBuildDefinitions(){
  const source=buildSourceState;
@@ -60,10 +67,51 @@ async function loadBuildJobs(){
  const id=state.project;
  try{
   const jobs=await api(`/api/projects/${id}/builds`);if(state.project!==id)return;
-  const stages={pull:'正在拉取',build:'正在构建',package:'正在打包',metadata:'读取版本',publish:'正在发布',script:'项目脚本执行中',complete:'完成'};
-  $('#build-jobs').innerHTML=jobs.length?'<h3>构建记录</h3>'+jobs.map(j=>`<article class="build-job"><div><strong>${escape(j.title||j.profile_id||j.script||'ILS Build')}</strong> <span class="badge">${escape(j.status==='running'?(stages[j.stage]||'处理中'):j.status==='succeeded'?'发布成功':'未完成')}</span><div class="meta">${escape(j.mode==='profile'?'ILS Profile':'Project Script')} · ${date(j.created_at)} · ${escape((j.commit||'').slice(0,12))}</div>${j.error?`<p>${escape(j.error)}</p>`:''}<div class="meta">关联安装包：${j.release_ids.length} 个</div>${j.release_ids.map(r=>`<a class="build-artifact" href="/api/releases/${escape(r)}/download">下载 ${escape(r.slice(0,8))}</a>`).join(' ')}</div><button data-build-log="${escape(j.id)}">查看日志</button></article>`).join(''):'';
+  const stages={
+   preflight:'预检查',pull:'正在拉取',build:'正在构建',archive:'正在归档',validate:'正在验证',
+   export:'正在导出',package:'正在打包',notarize:'正在公证',upload:'正在上传',
+   publish:'正在发布到 ILS',submitted:'已提交',processing:'Apple 处理中',
+   metadata:'读取版本',script:'项目脚本执行中',complete:'完成'
+  };
+  const statusLabel=j=>{
+   if(j.status==='running')return stages[j.stage]||'处理中';
+   if(j.status==='succeeded'&&j.result?.lane==='ios-testflight')return 'TestFlight 已提交';
+   if(j.status==='succeeded')return '发布成功';
+   return '失败';
+  };
+  const progressView=j=>{
+   if(j.status!=='running'||!Number.isFinite(j.progress))return '';
+   const value=Math.max(0,Math.min(100,j.progress));
+   return `<div class="job-progress"><progress max="100" value="${value}"></progress><span>${value}%</span></div>`;
+  };
+  const resultView=j=>{
+   if(!j.result)return '';
+   const r=j.result;
+   if(r.lane==='ios-testflight'){
+    return `<div class="submission-result"><strong>TestFlight</strong><span>${escape(r.version)} (${escape(r.build)})</span><span>${escape(r.submission_result||r.status)}</span><small>上传成功不等于 Apple 已完成 Processing。</small></div>`;
+   }
+   return `<div class="meta">结果：${escape(r.lane||'artifact')} · ${escape(r.version||'')} (${escape(r.build||'')})</div>`;
+  };
+  $('#build-jobs').innerHTML=jobs.length?'<h3>构建记录</h3>'+jobs.map(j=>`<article class="build-job"><div class="build-job-main"><div><strong>${escape(j.title||j.profile_id||j.script||'ILS Build')}</strong> <span class="badge">${escape(statusLabel(j))}</span></div><div class="meta">${escape(j.mode==='profile'?'ILS Profile':'Project Script')} · ${date(j.created_at)} · ${escape((j.commit||'').slice(0,12))}</div>${j.message?`<div class="job-message">${escape(j.message)}</div>`:''}${progressView(j)}${j.error?`<p>${escape(j.error)}</p>`:''}${resultView(j)}${j.release_ids.length?`<div class="meta">关联安装包：${j.release_ids.length} 个</div>`:''}${j.release_ids.map(r=>`<a class="build-artifact" href="/api/releases/${escape(r)}/download">下载 ${escape(r.slice(0,8))}</a>`).join(' ')}</div><button data-build-log="${escape(j.id)}">查看日志</button></article>`).join(''):'';
   if(activeLog){const data=await api(`/api/builds/${activeLog}/log`);if(state.project!==id)return;$('#build-log').textContent=data.log;$('#build-log').hidden=false;}
  }catch(e){if(state.project===id)$('#source-info').textContent=e.message;}finally{buildLoading=false;}
+}
+function syncProfileForm(){
+ const form=$('#profile-form');
+ const platform=form.elements.platform.value;
+ const contract=form.elements.result_contract.value;
+ const lane=form.elements.lane;
+ [...lane.options].forEach(o=>o.hidden=!o.value.startsWith(platform+'-'));
+ if(!lane.value.startsWith(platform+'-'))lane.value=platform==='ios'?'ios-adhoc':'macos-test';
+ const legacy=contract!=='ils-result-v1';
+ form.elements.artifact.required=legacy;
+ form.elements.version_command.required=legacy&&platform==='macos';
+ form.elements.build_number_command.required=legacy&&platform==='macos';
+ $('#profile-contract-help').textContent=legacy
+  ?'兼容模式：ILS 根据 Artifact Path 发布；macOS 还需要 version/build 命令。'
+  :(lane.value==='ios-testflight'
+    ?'TestFlight：脚本上传 App Store Connect，并写入 ILS_OUTPUT_DIR/ils-result.json；不会创建伪造的本地安装包记录。'
+    :'标准模式：脚本写入 ILS_OUTPUT_DIR/ils-result.json，ILS 验证最终产物后负责发布。');
 }
 function openProfile(profile=null){
  if(!needAdmin())return;
@@ -71,7 +119,9 @@ function openProfile(profile=null){
  const form=$('#profile-form');form.reset();
  form.elements.id.readOnly=Boolean(profile);
  form.elements.platform.value='ios';form.elements.architecture.value='arm64';form.elements.channel.value='dev';form.elements.variant.value='default';
+ form.elements.lane.value='ios-adhoc';form.elements.result_contract.value='ils-result-v1';
  if(profile){for(const [key,value] of Object.entries(profile)){if(form.elements[key])form.elements[key].value=value??'';}}
+ syncProfileForm();
  $('#delete-profile').hidden=!profile;
  $('#profile-dialog-title').textContent=profile?'编辑 ILS Release Profile':'新建 ILS Release Profile';
  form.querySelector('.form-error').textContent='';
@@ -83,12 +133,15 @@ async function startBuild(payload,button){
  try{
   const job=await api(`/api/projects/${id}/builds`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   if(id!==state.project)return;
-  activeLog=job.id;await loadBuildJobs();notice('ILS 构建任务已启动；发布成功后安装包会自动出现在版本列表。');
+  activeLog=job.id;await loadBuildJobs();notice('ILS 发布任务已启动；构建、上传和 TestFlight 提交状态会在这里持续更新。');
  }catch(e){notice(e.message);}finally{button.disabled=false;}
 }
 $('#scan-builds').onclick=()=>{if(needAdmin()){loadBuildSource();loadBuildJobs();}};
 $('#source-form').onsubmit=async e=>{e.preventDefault();if(!needAdmin())return;if(!state.project)return notice('请先创建项目');const b=e.target.querySelector('[type=submit]');b.disabled=true;try{await api(`/api/projects/${state.project}/build-source`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});await loadBuildSource();notice('项目目录已关联，现在可以创建 ILS Release Profile。');}catch(e){notice(e.message);}finally{b.disabled=false;}};
 $('#new-release-profile').onclick=()=>openProfile();
+$('#profile-form [name=platform]').onchange=syncProfileForm;
+$('#profile-form [name=lane]').onchange=syncProfileForm;
+$('#profile-form [name=result_contract]').onchange=syncProfileForm;
 $('#release-profiles').onclick=async e=>{
  const create=e.target.closest('[data-create-profile]');if(create)return openProfile();
  const run=e.target.closest('[data-run-profile]');if(run)return startBuild({profile:run.dataset.runProfile},run);
