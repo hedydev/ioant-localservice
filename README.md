@@ -104,7 +104,7 @@ ILS_EVENT {"stage":"submitted","state":"succeeded","message":"Upload accepted"}
 
 An optional numeric `progress` is shown only when the underlying tool provides trustworthy progress. ILS does not invent percentages from elapsed time.
 
-For a local artifact lane, ILS validates the result file and artifact, then publishes through its own release API. For TestFlight, ILS stores the submitted result without creating a fake local IPA release. **App Store Connect upload acceptance is not the same as TestFlight processing completion or tester availability. ILS therefore leaves a successful upload at **submitted / waiting for Apple Processing** unless an Apple status source proves a later state. TestFlight Release Profiles may optionally store a `https://testflight.apple.com/join/...` invitation URL; only successful TestFlight jobs show the corresponding open action.**
+For a local artifact lane, ILS validates the result file and artifact, then publishes through its own release API. For TestFlight, ILS stores the submitted result without creating a fake local IPA release. **App Store Connect upload acceptance is not the same as TestFlight processing completion or tester availability.** ILS therefore leaves a successful upload at **submitted / waiting for Apple Processing** unless an Apple status source proves a later state. TestFlight Release Profiles may optionally store a `https://testflight.apple.com/join/...` invitation URL; only successful TestFlight jobs show the corresponding open action.
 
 Existing legacy Release Profiles using `artifact`, `version_command`, and `build_number_command`, plus project-owned self-publishing `release*.sh` scripts, remain supported for compatibility.
 

@@ -194,6 +194,7 @@ func serveAppIcon(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=60")
 	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), f)
 }
 
