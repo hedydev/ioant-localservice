@@ -177,6 +177,7 @@ platform
 - TestFlight Apple Public Link 与 Release Profile fallback 现在分开保存。Apple 关闭 Public Link 后，下一次成功同步会清除陈旧 public link 并回退到 Profile URL。
 - App Icon 使用统一 identity shell，并叠加平台徽标；真实 artwork 缺失或加载失败时保留平台 glyph fallback，不再留下空白图标位。
 - 本轮没有改变 `build-jobs.js` 的 3 秒任务/日志轮询、用户上滚暂停 follow、手动收起日志等行为。
+- Build Job 日志布局进一步固定为“任务详情 → 查看/收起日志 → 此任务日志面板”；按钮和日志都位于对应任务卡内部，不允许出现列表底部的共享日志区域。
 
 ## 2. 当前产品语义必须保持
 

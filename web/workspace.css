@@ -168,25 +168,37 @@
   color: #9a392e;
 }
 
-.build-job {
-  padding: 14px 0;
-  border-top: 1px solid var(--line);
-}
-
-.build-job-row {
-  display: flex;
-  justify-content: space-between;
+#build-jobs {
+  display: grid;
   gap: 12px;
-  align-items: flex-start;
 }
 
-.build-job-row > button {
-  flex: 0 0 auto;
+.build-job {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
 }
 
 .build-job-main {
-  flex: 1;
   min-width: 0;
+}
+
+.build-job-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #edf1f4;
+}
+
+.build-job-actions button {
+  min-width: 96px;
+}
+
+.build-job.log-expanded .build-job-actions {
+  margin-bottom: 10px;
 }
 
 .build-job p {
@@ -201,7 +213,7 @@
 }
 
 .build-log-panel {
-  margin-top: 13px;
+  margin-top: 0;
   border: 1px solid #283c50;
   border-radius: 10px;
   overflow: hidden;
@@ -338,12 +350,12 @@
     justify-content: flex-end;
   }
 
-  .build-job-row {
-    flex-direction: column;
+  .build-job-actions {
+    justify-content: stretch;
   }
 
-  .build-job-row > button {
-    align-self: flex-end;
+  .build-job-actions button {
+    width: 100%;
   }
 
   .build-log-heading {

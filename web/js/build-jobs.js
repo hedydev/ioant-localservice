@@ -162,23 +162,23 @@ function renderJobs(jobs){
   const expanded=buildState.activeLog===job.id;
   const logID='build-log-'+job.id;
   return '<article class="build-job'+(expanded?' log-expanded':'')+'">'+
-   '<div class="build-job-row">'+
-    '<div class="build-job-main">'+
-     '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
-     '<div class="build-title-row">'+buildAppIcon(job,{className:'job-app-icon',title:job.title||'App Icon'})+'<strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
-     '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
-     pipelineView(job)+
-     (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+
-     progressView(job)+
-     (job.error?'<p>'+escapeHTML(job.error)+'</p>':'')+
-     resultView(job)+
-     (releases.length?'<div class="meta">关联发布：'+releases.length+' 个</div>':'')+
-     linkedReleaseActions(job)+
-    '</div>'+
+   '<div class="build-job-main">'+
+    '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
+    '<div class="build-title-row">'+buildAppIcon(job,{className:'job-app-icon',title:job.title||'App Icon'})+'<strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
+    '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
+    pipelineView(job)+
+    (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+
+    progressView(job)+
+    (job.error?'<p>'+escapeHTML(job.error)+'</p>':'')+
+    resultView(job)+
+    (releases.length?'<div class="meta">关联发布：'+releases.length+' 个</div>':'')+
+    linkedReleaseActions(job)+
+   '</div>'+
+   '<div class="build-job-actions">'+
     '<button data-build-log="'+escapeHTML(job.id)+'" aria-expanded="'+(expanded?'true':'false')+'" aria-controls="'+escapeHTML(logID)+'">'+(expanded?'收起日志':'查看日志')+'</button>'+
    '</div>'+
    (expanded
-    ?'<div class="build-log-panel"><div class="build-log-heading"><strong>'+(job.status==='running'?'实时日志':'任务日志')+'</strong><span class="meta">'+(job.status==='running'?'任务执行时自动跟随最新输出':'已保存的任务输出')+'</span></div><pre class="build-log-output" id="'+escapeHTML(logID)+'" data-build-log-output="'+escapeHTML(job.id)+'" aria-label="'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+' 构建日志"></pre></div>'
+    ?'<div class="build-log-panel" data-log-for="'+escapeHTML(job.id)+'"><div class="build-log-heading"><strong>'+(job.status==='running'?'实时日志':'任务日志')+'</strong><span class="meta">'+(job.status==='running'?'仅显示此构建任务的实时输出':'仅显示此构建任务已保存的输出')+'</span></div><pre class="build-log-output" id="'+escapeHTML(logID)+'" data-build-log-output="'+escapeHTML(job.id)+'" aria-label="'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+' 构建日志"></pre></div>'
     :'')+
   '</article>';
  }).join('');
