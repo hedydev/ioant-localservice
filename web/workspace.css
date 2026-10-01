@@ -377,3 +377,62 @@
 .pipeline-arrow {
   color: #9aa7b5;
 }
+
+.platform-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 6px;
+  vertical-align: -0.13em;
+  color: currentColor;
+  white-space: nowrap;
+}
+
+.platform-icons.compact {
+  gap: 2px;
+  margin-right: 4px;
+}
+
+.platform-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.platform-icons.compact .platform-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.platform-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.workspace-tabs .platform-icons,
+.segmented .platform-icons {
+  margin-right: 5px;
+}
+
+.workspace-tabs button,
+.segmented button,
+.section-heading h2,
+.view-heading h2,
+.release-title .badge,
+.build-title-row strong {
+  display: flex;
+  align-items: center;
+}
+
+.release-title .badge {
+  width: fit-content;
+}

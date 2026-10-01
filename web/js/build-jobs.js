@@ -1,6 +1,7 @@
 
 import {$,state,api,escapeHTML,formatDate} from './core.js';
 import {buildState} from './build-state.js';
+import {platformIcons,targetsForJob} from './platform-ui.js';
 
 function updateBuildLog(text){
  const element=$('#build-log');
@@ -77,7 +78,7 @@ function renderJobs(jobs){
   return '<article class="build-job">'+
    '<div class="build-job-main">'+
     '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
-    '<div class="build-title-row"><strong>'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
+    '<div class="build-title-row"><strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
     '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
     pipelineView(job)+
     (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+

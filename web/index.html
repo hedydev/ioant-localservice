@@ -42,7 +42,7 @@
     <button data-view="overview" aria-pressed="true">概览</button>
     <button data-view="builds" data-admin hidden aria-pressed="false">构建与发布</button>
     <button data-view="releases" aria-pressed="false">版本历史</button>
-    <button data-view="ios" aria-pressed="false">iOS 安装</button>
+    <button data-view="ios" aria-pressed="false"><span data-platform-targets="iphone ipad"></span>iOS 安装</button>
     <button data-view="automation" data-admin hidden aria-pressed="false">自动化 / API</button>
   </nav>
 
@@ -101,8 +101,8 @@
     <div class="toolbar" aria-label="安装包筛选">
       <div class="segmented" id="platforms">
         <button data-platform="all" aria-pressed="true">全部平台</button>
-        <button data-platform="ios" aria-pressed="false">iOS</button>
-        <button data-platform="macos" aria-pressed="false">macOS</button>
+        <button data-platform="ios" aria-pressed="false"><span data-platform-targets="iphone ipad"></span>iOS</button>
+        <button data-platform="macos" aria-pressed="false"><span data-platform-targets="mac"></span>macOS</button>
       </div>
       <label>渠道 <select id="channel"><option value="all">全部渠道</option><option value="dev">开发版</option><option value="beta">测试版</option><option value="stable">正式版</option></select></label>
       <label>安装包 <select id="variant"><option value="all">全部安装包</option></select></label>
@@ -129,12 +129,12 @@
 
   <section id="view-ios" class="workspace-view" data-view-panel="ios" hidden>
     <div class="view-heading">
-      <div><h2>iOS 安装</h2><p>新设备可以先登记，再安装管理员为该设备发布的 Ad Hoc 版本。</p></div>
+      <div><h2><span data-platform-targets="iphone ipad"></span>iOS 安装</h2><p>新设备可以先登记，再安装管理员为该设备发布的 Ad Hoc 版本。</p></div>
       <button type="button" data-go-view="builds" data-admin hidden>查看 iOS Release Profiles</button>
     </div>
 
     <article class="panel-card">
-      <div class="section-heading"><div><h2>登记这台设备</h2><span class="meta">无需管理员密钥</span></div></div>
+      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>登记这台设备</h2><span class="meta">无需管理员密钥</span></div></div>
       <p>第一次使用的新 iPhone / iPad，需要先把设备信息提交给管理员。登记只收集 UDID、设备型号和 iOS 版本，不安装根证书或 MDM。</p>
       <div class="download-row">
         <a id="enroll-device-link" class="download" href="/api/devices/enroll.mobileconfig">登记这台 iPhone / iPad</a>
@@ -144,7 +144,7 @@
     </article>
 
     <article class="panel-card">
-      <div class="section-heading"><div><h2>可安装的 iOS 版本</h2><span class="meta">当前项目</span></div></div>
+      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>可安装的 iOS 版本</h2><span class="meta">当前项目</span></div></div>
       <div id="ios-install-releases"></div>
     </article>
 
@@ -156,14 +156,14 @@
     </article>
 
     <article class="panel-card" data-admin hidden>
-      <div class="section-heading"><div><h2>Mac 签名服务</h2><span class="meta">管理员 · 兼容流程</span></div></div>
+      <div class="section-heading"><div><h2><span data-platform-targets="mac"></span>Mac 签名服务</h2><span class="meta">管理员 · 兼容流程</span></div></div>
       <p>使用 ILS 已配置的 Xcode archive 进行签名与发布。新的项目发布优先使用 Release Profile。</p>
       <button id="sign-button">请求 Mac 签名</button>
       <p id="sign-state" role="status"></p>
     </article>
 
     <article class="panel-card" data-admin hidden>
-      <div class="section-heading"><div><h2>TestFlight</h2><span class="meta">管理员 · App Store Connect</span></div></div>
+      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>TestFlight</h2><span class="meta">管理员 · App Store Connect</span></div></div>
       <p>TestFlight 是独立发布流程，不会和 Ad Hoc 一键同时执行。通过 <code>ios-testflight</code> Release Profile 单独提交。</p>
       <button type="button" data-go-view="builds">前往构建与发布</button>
     </article>
@@ -179,7 +179,7 @@
     </article>
   </section>
 
-  <footer>LOCAL STORAGE · iOS & macOS <span>页面数据会自动刷新</span></footer>
+  <footer><span><span data-platform-targets="iphone ipad mac"></span>LOCAL STORAGE · iOS & macOS</span><span>页面数据会自动刷新</span></footer>
 </main>
 </div>
 

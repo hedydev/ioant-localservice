@@ -1,6 +1,7 @@
 
 import {$,state,api,escapeHTML,channelNames,formatSize,formatDate,notice,needAdmin} from './core.js';
 import {refreshData} from './projects.js';
+import {platformIcons,targetsForRelease} from './platform-ui.js';
 
 function installNote(release){
  if(release.platform!=='ios')return release.architecture+' · macOS';
@@ -40,7 +41,7 @@ function renderOverview(){
   ['全部版本',state.releases.length],
   ['iOS',iosCount],
   ['macOS',macCount]
- ].map(item=>'<div class="overview-stat"><strong>'+item[1]+'</strong><span>'+item[0]+'</span></div>').join('');
+ ].map(item=>'<div class="overview-stat"><strong>'+item[1]+'</strong><span>'+platformIcons(item[0]==='iOS'?['iphone','ipad']:item[0]==='macOS'?['mac']:[]) + item[0]+'</span></div>').join('');
 
  if(!latest){
   $('#overview-latest').innerHTML='<div class="empty"><strong>暂无已发布安装包</strong>发布完成后，最新版本会显示在这里。</div>';
@@ -48,7 +49,7 @@ function renderOverview(){
  }
  $('#overview-latest').innerHTML=
   '<article class="latest-card">'+
-   '<div class="card-top"><span>最新发布 · '+(latest.platform==='ios'?'iOS':'macOS')+'</span><span class="badge">'+channelNames[latest.channel]+'</span></div>'+
+   '<div class="card-top"><span>'+platformIcons(targetsForRelease(latest))+'最新发布 · '+(latest.platform==='ios'?'iOS':latest.platform==='macos'?'macOS':escapeHTML(latest.platform))+'</span><span class="badge">'+channelNames[latest.channel]+'</span></div>'+
    '<div class="version-title">'+escapeHTML(latest.version)+' <small>build '+latest.build+'</small></div>'+
    '<p>'+escapeHTML(latest.notes||'暂无更新说明')+'</p>'+
    releaseActions(latest)+
@@ -75,7 +76,7 @@ function renderReleaseHistory(){
   details+='</details>';
   return '<article class="release">'+
    '<div class="release-top">'+
-    '<div class="release-title">'+escapeHTML(release.version)+' <span class="badge">'+(release.platform==='ios'?'iOS':'macOS')+' · '+channelNames[release.channel]+'</span><div class="meta">build '+release.build+' · '+formatDate(release.created_at)+'</div></div>'+
+    '<div class="release-title">'+escapeHTML(release.version)+' <span class="badge">'+platformIcons(targetsForRelease(release),{className:'compact'})+(release.platform==='ios'?'iOS':release.platform==='macos'?'macOS':escapeHTML(release.platform))+' · '+channelNames[release.channel]+'</span><div class="meta">build '+release.build+' · '+formatDate(release.created_at)+'</div></div>'+
     '<span class="meta">'+formatSize(release.size)+'</span>'+
    '</div>'+
    '<p>'+escapeHTML(release.notes||'暂无更新说明')+'</p>'+

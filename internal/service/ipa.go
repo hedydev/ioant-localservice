@@ -23,6 +23,7 @@ type IOSInfo struct {
 	DeviceCount       int        `json:"device_count"`
 	TeamID            string     `json:"team_id,omitempty"`
 	SignatureVerified bool       `json:"signature_verified"`
+	DeviceTargets     []string   `json:"device_targets,omitempty"`
 }
 
 // Profile metadata is an installation prerequisite, never a signature verification.
@@ -86,6 +87,24 @@ func inspectIPA(path string) (*IOSInfo, error) {
 	}
 	str := func(key string) string { v, _ := info[key].(string); return v }
 	out := &IOSInfo{BundleID: str("CFBundleIdentifier"), Version: str("CFBundleShortVersionString"), Build: str("CFBundleVersion"), ProfileType: "unsigned"}
+	if families, ok := info["UIDeviceFamily"].([]any); ok {
+		for _, value := range families {
+			number, ok := value.(float64)
+			if !ok {
+				continue
+			}
+			switch int(number) {
+			case 1:
+				if !oneOf("iphone", out.DeviceTargets...) {
+					out.DeviceTargets = append(out.DeviceTargets, "iphone")
+				}
+			case 2:
+				if !oneOf("ipad", out.DeviceTargets...) {
+					out.DeviceTargets = append(out.DeviceTargets, "ipad")
+				}
+			}
+		}
+	}
 	if out.BundleID == "" || out.Version == "" || out.Build == "" {
 		return nil, fmt.Errorf("IPA 缺少 Bundle ID 或版本信息")
 	}

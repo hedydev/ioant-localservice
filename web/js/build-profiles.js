@@ -2,6 +2,7 @@
 import {$,state,api,escapeHTML,notice,needAdmin} from './core.js';
 import {buildState} from './build-state.js';
 import {startBuild} from './build-actions.js';
+import {platformIcons,targetsForProfile} from './platform-ui.js';
 
 let appleSigningTeams=[];
 
@@ -62,7 +63,7 @@ function profileSummary(profile){
   ?(lane==='ios-testflight'?'App Store Connect / TestFlight submission':'由 ILS_OUTPUT_DIR/ils-result.json 返回最终产物')
   :'产物：'+profile.artifact;
  const team=profile.apple_team_id?'<br>Apple Team · '+escapeHTML(profile.apple_team_id):'';
- return (profile.platform==='ios'?'iOS':'macOS')+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+'<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team;
+ return platformIcons(targetsForProfile(profile))+(profile.platform==='ios'?'iOS':profile.platform==='macos'?'macOS':escapeHTML(profile.platform))+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+'<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team;
 }
 
 function renderProfiles(){
@@ -80,7 +81,7 @@ function renderProfiles(){
   const runBlocked=blocked||teamRequired;
   return '<article class="release">'+
    '<div class="release-top">'+
-    '<div><strong>'+escapeHTML(profile.name)+'</strong><div class="meta">ILS / '+escapeHTML(profile.id)+'</div></div>'+
+    '<div><strong>'+platformIcons(targetsForProfile(profile))+escapeHTML(profile.name)+'</strong><div class="meta">ILS / '+escapeHTML(profile.id)+'</div></div>'+
     '<div class="profile-actions"><button data-edit-profile="'+escapeHTML(profile.id)+'">编辑</button><button data-run-profile="'+escapeHTML(profile.id)+'" '+(runBlocked?'disabled':'')+'>构建并发布</button></div>'+
    '</div>'+
    '<p class="meta">'+profileSummary(profile)+'</p>'+

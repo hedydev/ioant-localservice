@@ -23,6 +23,7 @@ web/
 │  ├─ core.js              # shared state, API/auth, notices, admin session
 │  ├─ navigation.js        # workspace tabs/hash navigation
 │  ├─ projects.js          # project list and shared data refresh
+│  ├─ platform-ui.js       # shared Mac/iPhone/iPad/Android target icons
 │  ├─ releases.js          # overview, history, filters, manual upload
 │  ├─ build-state.js       # build-page client state only
 │  ├─ build-actions.js     # shared build start action
@@ -44,6 +45,7 @@ Keep these boundaries when adding features:
 - Authentication and Bearer-header behavior belong in `core.js`.
 - Project selection and shared project/release fetching belong in `projects.js`.
 - Release/package presentation belongs in `releases.js`.
+- Platform/device icon rendering belongs in `platform-ui.js`; feature modules must reuse it instead of embedding their own SVG or emoji.
 - Git source configuration must not be added to release-history code.
 - Release Profile forms and CRUD belong in `build-profiles.js`.
 - Task state, progress and build logs belong in `build-jobs.js`.
@@ -114,3 +116,23 @@ All dialogs share the base rules in `style.css`:
 - the dialog heading remains visible while long forms scroll.
 
 Feature modules should not add ad-hoc dialog widths unless a genuinely different interaction requires it.
+
+
+## Platform and device icons
+
+Titles, labels, release badges, Release Profiles and build-task titles use the shared `platform-ui.js` renderer.
+
+Supported target keys are currently:
+
+```text
+mac       Mac
+iphone    iPhone
+ipad      iPad
+android   Android (reserved for the future Android lane)
+```
+
+The icons are local inline SVG outlines and do not depend on external fonts or icon CDNs.
+
+For published IPA files, ILS reads `UIDeviceFamily` from the IPA's app `Info.plist` and exposes detected device targets through `ios.device_targets`, so release-history icons can distinguish iPhone and iPad support from artifact evidence. UI code should prefer explicit target metadata when available and use platform defaults only when target-level metadata is unavailable.
+
+When Android distribution is added, extend the backend platform contract and target metadata; the visual renderer already has an Android target and should remain the single icon implementation.

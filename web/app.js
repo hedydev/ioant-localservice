@@ -1,3 +1,4 @@
+import {initPlatformUI} from './js/platform-ui.js';
 import {initCore} from './js/core.js';
 import {initNavigation} from './js/navigation.js';
 import {initProjects} from './js/projects.js';
@@ -9,6 +10,7 @@ import {initIOS} from './js/ios.js';
 import {initAutomation} from './js/automation.js';
 
 initCore();
+initPlatformUI();
 initNavigation();
 initProjects();
 initReleases();
