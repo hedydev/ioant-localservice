@@ -168,7 +168,7 @@ For this lane ILS requires an explicit successful App Store Connect submission r
 
 The TestFlight Release starts at **submitted to App Store Connect**. This is intentionally different from “TestFlight available”. When App Store Connect API access is configured, ILS resolves the release by `bundle_id + marketing version + build number`, reads Apple Processing and beta-detail state, and updates the same Release record to `processing`, `available`, or `unavailable`. Without API access, the release remains submitted rather than inventing later states.
 
-If Apple exposes an enabled Beta Group public link, ILS uses that as the release action. The optional Release Profile `testflight_url` remains a fallback invitation link.
+If Apple exposes an enabled Beta Group public link, ILS stores it separately as `testflight.public_link` and uses it as the release action. The optional Release Profile `testflight_url` is retained as `testflight.fallback_url`. On every successful Apple refresh, the effective `open_url` is recalculated as public link → profile fallback → empty, so a disabled Apple public link cannot remain stale in ILS.
 
 ## Recommended profiles
 

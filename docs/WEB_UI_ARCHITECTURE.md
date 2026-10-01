@@ -23,7 +23,8 @@ web/
 │  ├─ core.js              # shared state, API/auth, notices, admin session
 │  ├─ navigation.js        # workspace tabs/hash navigation
 │  ├─ projects.js          # project list and shared data refresh
-│  ├─ platform-ui.js       # shared Mac/iPhone/iPad/Android target icons
+│  ├─ platform-ui.js       # shared App Icon + Mac/iPhone/iPad/Android presentation
+│  ├─ release-ui.js        # shared Release card/actions/TestFlight lifecycle
 │  ├─ releases.js          # overview, history, filters, manual upload
 │  ├─ build-state.js       # build-page client state only
 │  ├─ build-actions.js     # shared build start action
@@ -45,7 +46,7 @@ Keep these boundaries when adding features:
 
 - Authentication and Bearer-header behavior belong in `core.js`.
 - Project selection and shared project/release fetching belong in `projects.js`.
-- Unified Release presentation belongs in `releases.js`; delivery-specific actions must branch on Release metadata instead of creating separate histories.
+- Shared Release card/status/action/TestFlight lifecycle presentation belongs in `release-ui.js`. `releases.js` owns Overview/History composition and filters, while `ios.js` reuses the same renderer instead of maintaining a second Release UI.
 - Platform/device icon rendering belongs in `platform-ui.js`; feature modules must reuse it instead of embedding their own SVG or emoji.
 - Git source configuration must not be added to release-history code.
 - Release Profile forms and CRUD belong in `build-profiles.js`.
@@ -160,7 +161,7 @@ A successful Xcode upload or `ils-result-v1` result with `status=submitted` crea
 
 When App Store Connect API access is configured, ILS polls Apple for the matching Bundle ID / marketing version / build number and synchronizes `processingState`, Build Beta Detail, and an enabled Beta Group public link. Those verified states update both the Release card and its associated Build Job.
 
-The TestFlight Release is rendered by the same Overview, Release History and iOS release-list components as Ad Hoc. Its primary action is **在 TestFlight 中打开** instead of IPA install/download. An `ios-testflight` Release Profile may still store an optional `testflight_url` invitation as a fallback when Apple does not expose a public link through the configured account.
+Overview, Release History and iOS Release all call the same `release-ui.js` card renderer. TestFlight cards show the same verified lifecycle (`submitted → Apple Processing → available`) and use **在 TestFlight 中打开** instead of IPA install/download. An `ios-testflight` Release Profile may still store an optional `testflight_url` invitation as a fallback when Apple does not expose a public link through the configured account.
 
 ## App Icon presentation
 
@@ -170,7 +171,7 @@ ILS keeps a platform-specific project icon cache. When a linked Git source is in
 
 For published iOS IPA files, ILS additionally extracts the largest usable compiled main-app App Icon PNG when available. Every new Release snapshots an icon into release-specific storage. TestFlight releases and macOS/fallback releases use the current platform-specific project cache when no artifact icon can be extracted. Existing releases are backfilled lazily from their retained artifact/cache when possible. Release History and the iOS release list use the release snapshot.
 
-If no usable icon is available, the UI omits the App Icon and keeps the platform glyphs.
+The UI wraps artwork in a shared App Icon shell with a small platform badge. If the artwork endpoint is missing or fails to load, the shell remains visible and falls back to the Mac/iPhone/iPad glyphs instead of leaving an empty identity slot.
 
 ## App Store Connect module boundary
 
@@ -187,5 +188,7 @@ private_key_path # absolute path on the ILS Mac
 ```
 
 The private key stays on disk. Browser/API responses may show its path and file permission to an authenticated administrator, but never its contents.
+
+The iOS administrator panel presents Team vs Individual key type, connection/refresh state, last check time, and the effective upload-auth route. Team keys can be injected into `xcodebuild`; Individual keys remain status-query credentials while upload uses the signed-in Xcode account. Saving a connected key triggers one immediate TestFlight status refresh; the panel then polls only the local config/status endpoint every 10 seconds while visible.
 
 Public release-list reads may schedule a rate-limited background TestFlight refresh when a valid App Store Connect configuration exists. Network refresh does not block the current release-list response.

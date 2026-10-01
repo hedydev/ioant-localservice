@@ -1,4 +1,3 @@
-
 const definitions={
  mac:{
   label:'Mac',
@@ -76,18 +75,30 @@ export function appIcon(src,{className='',title=''}={}){
   (title?' title="'+escapeAttribute(title)+'"':'')+'>';
 }
 
+function appIdentityIcon(src,targets,{className='',title=''}={}){
+ const values=uniqueTargets(targets);
+ const fallback=platformIcons(values,{className:'app-icon-fallback-platforms'});
+ const badge=platformIcons(values,{className:'compact app-icon-platform-icons'});
+ return '<span class="app-icon-shell '+escapeAttribute(className)+'"'+(title?' title="'+escapeAttribute(title)+'"':'')+'>'+
+  '<span class="app-icon-fallback" aria-hidden="true">'+fallback+'</span>'+
+  (src?'<img data-app-icon class="app-icon" src="'+escapeAttribute(src)+'" alt="" loading="lazy">':'')+
+  (badge?'<span class="app-platform-badge">'+badge+'</span>':'')+
+ '</span>';
+}
+
 export function projectAppIcon(project,platform,options={}){
  if(!project||!['ios','macos'].includes(platform))return '';
- return appIcon('/api/projects/'+encodeURIComponent(project)+'/icon?platform='+encodeURIComponent(platform),options);
+ return appIdentityIcon('/api/projects/'+encodeURIComponent(project)+'/icon?platform='+encodeURIComponent(platform),targetsForPlatform(platform),options);
 }
 
 export function buildAppIcon(job,options={}){
  if(!job?.id)return '';
- return appIcon('/api/builds/'+encodeURIComponent(job.id)+'/icon',options);
+ return appIdentityIcon('/api/builds/'+encodeURIComponent(job.id)+'/icon',targetsForJob(job),options);
 }
 
 export function releaseAppIcon(release,options={}){
- return appIcon(release?.app_icon_url||'',options);
+ if(!release)return '';
+ return appIdentityIcon(release.app_icon_url||'',targetsForRelease(release),options);
 }
 
 export function decoratePlatformIcons(root=document){

@@ -60,15 +60,23 @@ The raw Apple fields are also retained under the Release's `testflight` metadata
 
 ## TestFlight link
 
-If a Beta Group has an enabled public link, ILS stores that link as the Release `open_url`. It takes priority over the optional Release Profile `testflight_url` fallback.
+If a Beta Group has an enabled public link, ILS stores it as `testflight.public_link`. The optional Release Profile `testflight_url` is retained separately as `testflight.fallback_url`.
 
-The same Release card then shows **Open in TestFlight** anywhere releases are presented. Ad Hoc/local releases keep their install/download actions.
+The effective Release `open_url` is resolved in this order:
+
+1. enabled Apple Beta Group public link;
+2. Release Profile fallback link;
+3. no link.
+
+Because the two sources are stored separately, a later successful Apple refresh can remove a disabled/stale public link and fall back to the profile URL instead of keeping an obsolete `open_url`. The shared Release UI labels whether the current action comes from **Apple Public Link** or **Profile fallback**. Ad Hoc/local releases keep their install/download actions.
 
 ## Refresh behavior
 
 Release-list access schedules a background refresh at most once every 60 seconds. Submitted/processing releases stay eligible for frequent refresh; terminal available/unavailable releases are checked less often. The current response is not held open while Apple is queried.
 
-An administrator can also run **Refresh Release Status** from the iOS Release page for an immediate refresh.
+An administrator can also run **Refresh Release Status** from the iOS Release page for an immediate refresh. Saving a successfully validated key immediately runs one release-state refresh so the UI does not require a second manual action.
+
+While the iOS Release view is open for an administrator, the browser re-reads the local App Store Connect configuration status every 10 seconds. This status read does not itself call Apple; it keeps the connection type, refresh-in-progress state, last check time, and upload-auth path current in the UI.
 
 The associated Build Job is updated from the Release state so the pipeline can move from:
 

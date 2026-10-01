@@ -1,11 +1,10 @@
 # AI 工作交接 — ILS
 
 > Last updated: 2026-10-02  
-> Last implementation commit: `44ec6e348d9734d8eafaff1abffa40e62ee87980`  
 > AI-Agent: ChatGPT  
-> AI-Session: `ils-unified-testflight-release`
+> AI-Session: `ils-release-ui-convergence-2026-10-02`
 
-本文记录当前这轮 ILS UI / Apple Release 工作的关键实现、产品语义和下一步验证点，供下一位 AI 或开发者直接接手。可复用的架构规则仍以 `docs/ARCHITECTURE.md`、`docs/RELEASE_PROFILES.md`、`docs/APP_STORE_CONNECT.md` 及 Hero Skills 为准。
+本文记录当前这轮 ILS UI / Apple Release 工作的关键实现、产品语义和下一步验证点，供下一位 AI 或开发者直接接手。可复用的架构规则仍以 `docs/WEB_UI_ARCHITECTURE.md`、`docs/RELEASE_PROFILES.md`、`docs/APP_STORE_CONNECT.md` 为准。
 
 ## 1. 已完成的重要工作
 
@@ -168,6 +167,17 @@ platform
 
 后续新增 Android 时，应扩展统一 platform metadata / icon mapping，而不是在各页面单独写死判断。
 
+### 1.8 统一 Release 展示与 ASC 状态体验（2026-10-02）
+
+本次继续在上述模型上做收敛，不改变 Build Job 的 3 秒轮询规则：
+
+- 新增 `web/js/release-ui.js`，Overview / Release History / iOS Release 统一使用同一个 Release card、动作和 TestFlight lifecycle renderer，不再由 `releases.js` 与 `ios.js` 各维护一套状态文案。
+- TestFlight Release 明确显示 `submitted → Apple Processing → available` 三段生命周期；Build Job 结果区复用同一状态文案与 lifecycle。
+- App Store Connect 管理区显示 Team / Individual Key、连接状态、最近检查、TestFlight 上传认证路径；保存且验证成功后立即同步一次 Release 状态，页面可见时每 10 秒只回读本地配置状态。
+- TestFlight Apple Public Link 与 Release Profile fallback 现在分开保存。Apple 关闭 Public Link 后，下一次成功同步会清除陈旧 public link 并回退到 Profile URL。
+- App Icon 使用统一 identity shell，并叠加平台徽标；真实 artwork 缺失或加载失败时保留平台 glyph fallback，不再留下空白图标位。
+- 本轮没有改变 `build-jobs.js` 的 3 秒任务/日志轮询、用户上滚暂停 follow、手动收起日志等行为。
+
 ## 2. 当前产品语义必须保持
 
 最重要的一条：
@@ -203,6 +213,7 @@ web/
 ├─ app.js
 └─ js/
    ├─ ios.js
+   ├─ release-ui.js
    ├─ releases.js
    ├─ build-jobs.js
    └─ app-store-connect.js
@@ -230,7 +241,7 @@ Unify TestFlight releases and sync App Store Connect state
 - 相关测试
 - docs 更新
 
-**本轮通过 GitHub 修改并提交代码，尚未在当前对话中执行本机 `go test ./...` / 完整 ILS runtime 验证。**
+**当前对话已对新增/重写的前端 ES modules 执行 JavaScript 语法检查；仍未在用户 Mac 上执行本次提交后的 `go test ./...` / 完整 ILS runtime 验证。**
 
 因此下一位接手者首先应该在本机从当前 `main` 开始：
 

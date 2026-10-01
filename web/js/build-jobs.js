@@ -2,6 +2,7 @@
 import {$,state,api,escapeHTML,formatDate} from './core.js';
 import {buildState} from './build-state.js';
 import {platformIcons,targetsForJob,buildAppIcon} from './platform-ui.js';
+import {releaseStatusLabel,testFlightLifecycleView,testFlightLinkSource} from './release-ui.js';
 
 function logElement(jobID){
  return document.getElementById('build-log-'+jobID);
@@ -51,8 +52,9 @@ function linkedRelease(job){
 function linkedReleaseActions(job){
  return linkedReleases(job).map(release=>{
   if(release.delivery==='testflight'){
+   const source=testFlightLinkSource(release);
    return release.open_url
-    ?'<a class="build-artifact" href="'+escapeHTML(release.open_url)+'">在 TestFlight 中打开</a>'
+    ?'<span class="build-release-action"><a class="build-artifact" href="'+escapeHTML(release.open_url)+'">在 TestFlight 中打开</a>'+(source?'<span class="release-link-source">'+escapeHTML(source)+'</span>':'')+'</span>'
     :'<span class="meta">TestFlight 链接尚未可用</span>';
   }
   return release.download_url
@@ -94,15 +96,12 @@ function resultView(job){
  if(result.lane==='ios-testflight'){
   const release=linkedRelease(job);
   const releaseStatus=release?.status||'submitted';
-  const stateText={
-   submitted:'已提交到 App Store Connect',
-   processing:'Apple Processing',
-   available:'TestFlight 可测试',
-   unavailable:'当前不可测试'
-  }[releaseStatus]||releaseStatus;
+  const presentation=release||{delivery:'testflight',status:releaseStatus,status_message:job.message||''};
+  const stateText=releaseStatusLabel(presentation);
   const openURL=release?.open_url||job.testflight_url||'';
+  const source=release?testFlightLinkSource(release):'';
   const link=openURL
-   ?'<a class="testflight-link" href="'+escapeHTML(openURL)+'">在 TestFlight 中打开</a>'
+   ?'<span class="build-release-action"><a class="testflight-link" href="'+escapeHTML(openURL)+'">在 TestFlight 中打开</a>'+(source?'<span class="release-link-source">'+escapeHTML(source)+'</span>':'')+'</span>'
    :'';
   const detail=release?.status_message||
    (releaseStatus==='submitted'
@@ -112,7 +111,7 @@ function resultView(job){
      :releaseStatus==='available'
       ?'Apple 状态已确认此构建可用于 TestFlight 测试。'
       :'Apple 当前状态不允许测试。');
-  return '<div class="submission-result"><strong>iOS 发布</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(stateText)+'</span><small>'+escapeHTML(detail)+'</small>'+link+'</div>';
+  return '<div class="submission-result"><strong>iOS 发布</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(stateText)+'</span><small>'+escapeHTML(detail)+'</small>'+testFlightLifecycleView(presentation,{compact:true})+link+'</div>';
  }
  return '<div class="meta">结果：'+escapeHTML(result.lane||'artifact')+' · '+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</div>';
 }

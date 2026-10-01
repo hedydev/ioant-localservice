@@ -565,3 +565,342 @@
 .testflight-link:hover {
   background: #e4effb;
 }
+
+/* Unified Release presentation */
+.release-card {
+  position: relative;
+}
+
+.release-card.featured {
+  border-color: #182736;
+  background: #182736;
+  color: #fff;
+  padding: 24px 26px;
+}
+
+.release-card.featured .meta,
+.release-card.featured .release-notes,
+.release-card.featured .release-status-message,
+.release-card.featured .release-last-sync {
+  color: #b8c5d0;
+}
+
+.release-heading-copy {
+  min-width: 0;
+}
+
+.release-title-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  font-size: 1.05rem;
+}
+
+.release-title-line > strong {
+  font-size: 1.12rem;
+}
+
+.release-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f7f9fb;
+  color: #526578;
+  font-size: .75rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.release-status.status-submitted {
+  border-color: #d7dfe8;
+  background: #f5f7fa;
+  color: #536577;
+}
+
+.release-status.status-processing {
+  border-color: #c8d9ec;
+  background: #eef4fb;
+  color: #285d8f;
+}
+
+.release-status.status-available,
+.release-status.status-published {
+  border-color: #cfe3d6;
+  background: #eef7f1;
+  color: #246e52;
+}
+
+.release-status.status-unavailable {
+  border-color: #efcbc5;
+  background: #fff1ef;
+  color: #a13026;
+}
+
+.release-card.featured .release-status.status-submitted,
+.release-card.featured .release-status.status-processing,
+.release-card.featured .release-status.status-available,
+.release-card.featured .release-status.status-published,
+.release-card.featured .release-status.status-unavailable {
+  border-color: #ffffff2b;
+  background: #ffffff14;
+  color: #e8f1f8;
+}
+
+.release-notes {
+  margin-top: 13px;
+}
+
+.release-status-message {
+  margin: 8px 0 10px;
+  font-size: .8125rem;
+  color: var(--muted);
+}
+
+.release-lifecycle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 12px 0 7px;
+}
+
+.release-lifecycle.compact {
+  margin: 6px 0 2px;
+}
+
+.release-lifecycle-step {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px dashed #d4dce4;
+  background: #fbfcfd;
+  color: #7a8794;
+  font-size: .73rem;
+}
+
+.release-lifecycle-step.done {
+  border-style: solid;
+  border-color: #cfe3d6;
+  background: #eef7f1;
+  color: #246e52;
+}
+
+.release-lifecycle-step.active {
+  border-style: solid;
+  border-color: #c8d9ec;
+  background: #eef4fb;
+  color: #285d8f;
+  font-weight: 650;
+}
+
+.release-lifecycle-step.failed {
+  border-style: solid;
+  border-color: #efcbc5;
+  background: #fff1ef;
+  color: #a13026;
+  font-weight: 650;
+}
+
+.release-lifecycle-arrow {
+  color: #9aa7b5;
+  font-size: .72rem;
+}
+
+.release-last-sync {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: .72rem;
+}
+
+.release-card.featured .release-lifecycle-step.waiting {
+  border-color: #ffffff30;
+  background: #ffffff0a;
+  color: #aebdca;
+}
+
+.release-card.featured .release-lifecycle-step.done,
+.release-card.featured .release-lifecycle-step.active,
+.release-card.featured .release-lifecycle-step.failed {
+  border-color: #ffffff35;
+  background: #ffffff12;
+  color: #edf5fb;
+}
+
+.release-link-source {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid #dce3ea;
+  border-radius: 7px;
+  color: var(--muted);
+  background: #fafbfc;
+  font-size: .72rem;
+}
+
+.release-card.featured .release-link-source {
+  border-color: #ffffff2b;
+  background: #ffffff0f;
+  color: #c4ced9;
+}
+
+/* App artwork with deterministic platform fallback + platform badge. */
+.app-icon-shell {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: visible;
+  border-radius: 22%;
+  background: #eef2f5;
+  box-shadow: 0 1px 4px #14253824;
+}
+
+.app-icon-shell .app-icon {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  border-radius: 22%;
+  box-shadow: none;
+}
+
+.app-icon-fallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: #64778a;
+}
+
+.app-icon-fallback .platform-icons {
+  margin: 0;
+  gap: 1px;
+}
+
+.app-icon-fallback .platform-icon {
+  width: 42%;
+  height: 42%;
+}
+
+.app-platform-badge {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 2px 4px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #fff;
+  color: #40566c;
+  box-shadow: 0 1px 4px #14253824;
+}
+
+.app-platform-badge .platform-icons {
+  margin: 0;
+}
+
+.release-card.featured .app-platform-badge {
+  border-color: #182736;
+}
+
+/* App Store Connect connection/sync summary. */
+.asc-status-card {
+  margin-top: 16px;
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafb;
+}
+
+.asc-status-card.unconfigured {
+  border-style: dashed;
+}
+
+.asc-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.asc-status-head + .asc-status-grid {
+  margin-top: 12px;
+}
+
+.asc-status-card p {
+  margin: 9px 0 0;
+  font-size: .8125rem;
+}
+
+.asc-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 8px;
+}
+
+.asc-status-grid > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e8edf2;
+}
+
+.asc-status-grid small {
+  color: var(--muted);
+  font-size: .7rem;
+}
+
+.asc-status-grid strong {
+  margin-top: 2px;
+  font-size: .78rem;
+  overflow-wrap: anywhere;
+}
+
+.asc-warning {
+  color: #8b5f1e !important;
+}
+
+.build-release-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.submission-result .release-lifecycle {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .release-status {
+    white-space: normal;
+    text-align: center;
+  }
+  .release-last-sync {
+    width: 100%;
+    margin-left: 0;
+  }
+  .asc-status-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .asc-status-grid {
+    grid-template-columns: minmax(0,1fr);
+  }
+}
+

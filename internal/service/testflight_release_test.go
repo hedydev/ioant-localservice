@@ -50,8 +50,20 @@ func TestPublishTestFlightReleaseCreatesMetadataRelease(t *testing.T) {
 	if release.OpenURL != profile.TestFlightURL {
 		t.Fatalf("open_url = %q, want %q", release.OpenURL, profile.TestFlightURL)
 	}
+	if release.TestFlight == nil || release.TestFlight.FallbackURL != profile.TestFlightURL {
+		t.Fatalf("fallback URL was not retained separately: %#v", release.TestFlight)
+	}
 	if len(a.state.Releases) != 1 {
 		t.Fatalf("release count = %d, want 1", len(a.state.Releases))
+	}
+
+	appleURL := "https://testflight.apple.com/join/ZyXw9876"
+	a.state.Releases[0].Status = "available"
+	a.state.Releases[0].StatusMessage = "TestFlight 已可测试"
+	a.state.Releases[0].OpenURL = appleURL
+	a.state.Releases[0].TestFlight = &TestFlightReleaseInfo{
+		PublicLink:  appleURL,
+		FallbackURL: profile.TestFlightURL,
 	}
 
 	again, err := a.publishTestFlightRelease(job, profile, result)
@@ -61,8 +73,57 @@ func TestPublishTestFlightReleaseCreatesMetadataRelease(t *testing.T) {
 	if again.ID != release.ID || len(a.state.Releases) != 1 {
 		t.Fatalf("idempotent TestFlight publish created duplicate: first=%s second=%s count=%d", release.ID, again.ID, len(a.state.Releases))
 	}
+	if again.Status != "available" || again.OpenURL != appleURL {
+		t.Fatalf("idempotent publish rewrote Apple state/link: %#v", again)
+	}
+	if again.TestFlight == nil || again.TestFlight.FallbackURL != profile.TestFlightURL {
+		t.Fatalf("idempotent publish lost fallback URL: %#v", again.TestFlight)
+	}
 }
 
+func TestTestFlightFallbackURLTracksSource(t *testing.T) {
+	fallback := "https://testflight.apple.com/join/Fallback1"
+	public := "https://testflight.apple.com/join/Public123"
+	tests := []struct {
+		name    string
+		release Release
+		want    string
+	}{
+		{
+			name:    "legacy open url is fallback",
+			release: Release{OpenURL: fallback, Delivery: "testflight"},
+			want:    fallback,
+		},
+		{
+			name: "apple public link without stored fallback",
+			release: Release{
+				OpenURL:    public,
+				Delivery:   "testflight",
+				TestFlight: &TestFlightReleaseInfo{PublicLink: public},
+			},
+			want: "",
+		},
+		{
+			name: "stored fallback survives apple public link",
+			release: Release{
+				OpenURL:  public,
+				Delivery: "testflight",
+				TestFlight: &TestFlightReleaseInfo{
+					PublicLink:  public,
+					FallbackURL: fallback,
+				},
+			},
+			want: fallback,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := testFlightFallbackURL(tc.release); got != tc.want {
+				t.Fatalf("fallback = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestSyncBuildJobFromTestFlightRelease(t *testing.T) {
 	a := &App{data: t.TempDir()}

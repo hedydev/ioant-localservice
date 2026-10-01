@@ -52,6 +52,7 @@ type TestFlightReleaseInfo struct {
 	InternalBuildState string     `json:"internal_build_state,omitempty"`
 	ExternalBuildState string     `json:"external_build_state,omitempty"`
 	PublicLink         string     `json:"public_link,omitempty"`
+	FallbackURL        string     `json:"fallback_url,omitempty"`
 	LastCheckedAt      *time.Time `json:"last_checked_at,omitempty"`
 	LastError          string     `json:"last_error,omitempty"`
 }
@@ -530,13 +531,26 @@ func testFlightState(processing, internal, external string, expired bool) (strin
 	}
 }
 
+func testFlightFallbackURL(release Release) string {
+	if release.TestFlight != nil {
+		if release.TestFlight.FallbackURL != "" {
+			return release.TestFlight.FallbackURL
+		}
+		if release.TestFlight.PublicLink != "" && release.OpenURL == release.TestFlight.PublicLink {
+			return ""
+		}
+	}
+	return release.OpenURL
+}
+
 func (r *ascResolver) testFlight(ctx context.Context, release Release) (testFlightLookup, error) {
 	now := time.Now().UTC()
-	info := TestFlightReleaseInfo{LastCheckedAt: &now}
+	fallbackURL := testFlightFallbackURL(release)
+	info := TestFlightReleaseInfo{FallbackURL: fallbackURL, LastCheckedAt: &now}
 	result := testFlightLookup{
 		Status:        "submitted",
 		StatusMessage: "已提交到 App Store Connect；等待 Apple 构建记录",
-		OpenURL:       release.OpenURL,
+		OpenURL:       fallbackURL,
 		Info:          info,
 	}
 	appID, e := r.appID(ctx, release.BundleID)
@@ -705,7 +719,7 @@ func (a *App) refreshTestFlightReleases(ctx context.Context, cfg AppStoreConnect
 				Status:        release.Status,
 				StatusMessage: release.StatusMessage,
 				OpenURL:       release.OpenURL,
-				Info:          TestFlightReleaseInfo{LastCheckedAt: &now, LastError: e.Error()},
+				Info:          TestFlightReleaseInfo{FallbackURL: testFlightFallbackURL(release), LastCheckedAt: &now, LastError: e.Error()},
 			}
 			if release.TestFlight != nil {
 				lookup.Info.AppleBuildID = release.TestFlight.AppleBuildID
@@ -731,9 +745,7 @@ func (a *App) refreshTestFlightReleases(ctx context.Context, cfg AppStoreConnect
 		}
 		next.Releases[i].Status = lookup.Status
 		next.Releases[i].StatusMessage = lookup.StatusMessage
-		if lookup.OpenURL != "" {
-			next.Releases[i].OpenURL = lookup.OpenURL
-		}
+		next.Releases[i].OpenURL = lookup.OpenURL
 		next.Releases[i].TestFlight = &lookup.Info
 		updated = append(updated, next.Releases[i])
 	}
@@ -853,7 +865,7 @@ func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, res
 		StatusMessage: "已提交到 App Store Connect；等待 Apple Processing",
 		OpenURL:       profile.TestFlightURL,
 		BuildJobID:    job.ID,
-		TestFlight:    &TestFlightReleaseInfo{},
+		TestFlight:    &TestFlightReleaseInfo{FallbackURL: profile.TestFlightURL},
 	}
 	a.snapshotReleaseIcon(release, "")
 
@@ -870,11 +882,21 @@ func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, res
 			existing.Channel == release.Channel &&
 			existing.Delivery == "testflight" {
 			existing.BundleID = release.BundleID
-			existing.Status = release.Status
-			existing.StatusMessage = release.StatusMessage
 			existing.BuildJobID = release.BuildJobID
-			if release.OpenURL != "" {
-				existing.OpenURL = release.OpenURL
+			if !oneOf(existing.Status, "submitted", "processing", "available", "unavailable") || existing.StatusMessage == "" {
+				existing.Status = release.Status
+				existing.StatusMessage = release.StatusMessage
+			}
+			info := TestFlightReleaseInfo{}
+			if existing.TestFlight != nil {
+				info = *existing.TestFlight
+			}
+			info.FallbackURL = profile.TestFlightURL
+			existing.TestFlight = &info
+			if info.PublicLink != "" {
+				existing.OpenURL = info.PublicLink
+			} else {
+				existing.OpenURL = profile.TestFlightURL
 			}
 			next := state{Projects: a.state.Projects, Releases: append([]Release{}, a.state.Releases...)}
 			next.Releases[i] = existing

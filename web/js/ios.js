@@ -1,27 +1,6 @@
-
-import {$,state,api,notice,needAdmin,escapeHTML,formatSize,channelNames} from './core.js';
+import {$,state,api,notice,needAdmin} from './core.js';
 import {refreshData} from './projects.js';
-import {platformIcons,targetsForRelease,releaseAppIcon} from './platform-ui.js';
-
-function testFlightStatusLabel(release){
- return ({
-  submitted:'已提交到 App Store Connect',
-  processing:'Apple Processing',
-  available:'TestFlight 可测试',
-  unavailable:'当前不可测试'
- })[release.status]||release.status||'已提交到 App Store Connect';
-}
-
-function iosInstallNote(release){
- if(release.delivery==='testflight')return release.status_message||testFlightStatusLabel(release);
- const info=release.ios;
- if(!info)return '签名状态未知';
- if(info.profile_type==='ad-hoc')return 'Ad Hoc · 仅限 provisioning profile 中已登记的设备';
- if(info.profile_type==='development')return '开发签名 · 通常需要 Xcode / Configurator 安装';
- if(info.profile_type==='enterprise')return '企业分发 · 仅限组织内部';
- if(info.profile_type==='app-store')return 'App Store 签名';
- return info.profile_type||'签名状态未知';
-}
+import {renderReleaseCard} from './release-ui.js';
 
 function renderPublicIOS(){
  const releases=state.releases.filter(item=>item.platform==='ios').slice(0,5);
@@ -37,28 +16,7 @@ function renderPublicIOS(){
   return;
  }
 
- container.innerHTML=releases.map(release=>{
-  let actions='';
-  if(release.delivery==='testflight'){
-   actions=release.open_url
-    ?'<a class="download" href="'+escapeHTML(release.open_url)+'">在 TestFlight 中打开</a>'
-    :'<span class="meta">TestFlight 链接尚未可用</span>';
-  }else{
-   const install=release.install_url
-    ?'<a class="download" href="'+escapeHTML(release.install_url)+'">安装到 iPhone / iPad</a>'
-    :'';
-   const download=release.download_url
-    ?'<a class="download '+(install?'secondary':'')+'" href="'+escapeHTML(release.download_url)+'">下载 IPA</a>'
-    :'';
-   actions=install+download;
-  }
-  return '<article class="release ios-install-release">'+
-   '<div class="release-top"><div class="release-identity">'+releaseAppIcon(release,{className:'release-app-icon',title:'App Icon'})+'<div><strong>'+platformIcons(targetsForRelease(release))+escapeHTML(release.version)+'</strong> <span class="badge">'+escapeHTML(channelNames[release.channel]||release.channel)+'</span><div class="meta">build '+release.build+' · '+(release.delivery==='testflight'?'TestFlight':'Ad Hoc / IPA')+'</div></div></div><span class="meta">'+(release.delivery==='testflight'?escapeHTML(testFlightStatusLabel(release)):formatSize(release.size))+'</span></div>'+
-   '<p>'+escapeHTML(release.notes||'暂无更新说明')+'</p>'+
-   '<p class="meta">'+escapeHTML(iosInstallNote(release))+'</p>'+
-   '<div class="download-row">'+actions+'</div>'+
-  '</article>';
- }).join('');
+ container.innerHTML=releases.map(release=>renderReleaseCard(release)).join('');
 }
 
 async function checkEnrollmentAvailability(){
