@@ -2,7 +2,7 @@
 import {$,state,api,escapeHTML,notice,needAdmin} from './core.js';
 import {buildState} from './build-state.js';
 import {startBuild} from './build-actions.js';
-import {platformIcons,targetsForProfile} from './platform-ui.js';
+import {platformIcons,targetsForProfile,projectAppIcon} from './platform-ui.js';
 
 let appleSigningTeams=[];
 
@@ -63,7 +63,8 @@ function profileSummary(profile){
   ?(lane==='ios-testflight'?'App Store Connect / TestFlight submission':'由 ILS_OUTPUT_DIR/ils-result.json 返回最终产物')
   :'产物：'+profile.artifact;
  const team=profile.apple_team_id?'<br>Apple Team · '+escapeHTML(profile.apple_team_id):'';
- return platformIcons(targetsForProfile(profile))+(profile.platform==='ios'?'iOS':profile.platform==='macos'?'macOS':escapeHTML(profile.platform))+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+'<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team;
+ const testflight=profile.testflight_url?'<br>TestFlight 邀请链接已配置':'';
+ return platformIcons(targetsForProfile(profile))+(profile.platform==='ios'?'iOS':profile.platform==='macos'?'macOS':escapeHTML(profile.platform))+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+'<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team+testflight;
 }
 
 function renderProfiles(){
@@ -81,7 +82,7 @@ function renderProfiles(){
   const runBlocked=blocked||teamRequired;
   return '<article class="release">'+
    '<div class="release-top">'+
-    '<div><strong>'+platformIcons(targetsForProfile(profile))+escapeHTML(profile.name)+'</strong><div class="meta">ILS / '+escapeHTML(profile.id)+'</div></div>'+
+    '<div class="profile-title-block">'+projectAppIcon(state.project,profile.platform,{className:'profile-app-icon',title:profile.name})+'<div><strong>'+platformIcons(targetsForProfile(profile))+escapeHTML(profile.name)+'</strong><div class="meta">ILS / '+escapeHTML(profile.id)+'</div></div></div>'+
     '<div class="profile-actions"><button data-edit-profile="'+escapeHTML(profile.id)+'">编辑</button><button data-run-profile="'+escapeHTML(profile.id)+'" '+(runBlocked?'disabled':'')+'>构建并发布</button></div>'+
    '</div>'+
    '<p class="meta">'+profileSummary(profile)+'</p>'+
@@ -123,7 +124,11 @@ function syncProfileForm(){
  if(!lane.value.startsWith(platform+'-'))lane.value=platform==='ios'?'ios-adhoc':'macos-test';
  const legacy=contract!=='ils-result-v1';
  const multipleTeams=appleSigningTeams.length>1;
+ const testflight=lane.value==='ios-testflight';
  form.elements.apple_team_id.required=platform==='ios'&&multipleTeams;
+ $('#profile-testflight-url-field').hidden=!testflight;
+ form.elements.testflight_url.disabled=!testflight;
+ if(!testflight)form.elements.testflight_url.value='';
  form.elements.artifact.required=legacy;
  form.elements.version_command.required=legacy&&platform==='macos';
  form.elements.build_number_command.required=legacy&&platform==='macos';

@@ -1,7 +1,7 @@
 
 import {$,state,api,escapeHTML,channelNames,formatSize,formatDate,notice,needAdmin} from './core.js';
 import {refreshData} from './projects.js';
-import {platformIcons,targetsForRelease} from './platform-ui.js';
+import {platformIcons,targetsForRelease,releaseAppIcon} from './platform-ui.js';
 
 function installNote(release){
  if(release.platform!=='ios')return release.architecture+' · macOS';
@@ -49,8 +49,10 @@ function renderOverview(){
  }
  $('#overview-latest').innerHTML=
   '<article class="latest-card">'+
-   '<div class="card-top"><span>'+platformIcons(targetsForRelease(latest))+'最新发布 · '+(latest.platform==='ios'?'iOS':latest.platform==='macos'?'macOS':escapeHTML(latest.platform))+'</span><span class="badge">'+channelNames[latest.channel]+'</span></div>'+
-   '<div class="version-title">'+escapeHTML(latest.version)+' <small>build '+latest.build+'</small></div>'+
+   '<div class="latest-app-summary">'+releaseAppIcon(latest,{className:'latest-app-icon',title:'App Icon'})+'<div class="latest-app-copy">'+
+    '<div class="card-top"><span>'+platformIcons(targetsForRelease(latest))+'最新发布 · '+(latest.platform==='ios'?'iOS':latest.platform==='macos'?'macOS':escapeHTML(latest.platform))+'</span><span class="badge">'+channelNames[latest.channel]+'</span></div>'+
+    '<div class="version-title">'+escapeHTML(latest.version)+' <small>build '+latest.build+'</small></div>'+
+   '</div></div>'+
    '<p>'+escapeHTML(latest.notes||'暂无更新说明')+'</p>'+
    releaseActions(latest)+
    '<p class="meta">'+escapeHTML(installNote(latest))+'</p>'+
@@ -76,7 +78,9 @@ function renderReleaseHistory(){
   details+='</details>';
   return '<article class="release">'+
    '<div class="release-top">'+
-    '<div class="release-title">'+escapeHTML(release.version)+' <span class="badge">'+platformIcons(targetsForRelease(release),{className:'compact'})+(release.platform==='ios'?'iOS':release.platform==='macos'?'macOS':escapeHTML(release.platform))+' · '+channelNames[release.channel]+'</span><div class="meta">build '+release.build+' · '+formatDate(release.created_at)+'</div></div>'+
+    '<div class="release-identity">'+releaseAppIcon(release,{className:'release-app-icon',title:'App Icon'})+
+     '<div class="release-title">'+escapeHTML(release.version)+' <span class="badge">'+platformIcons(targetsForRelease(release),{className:'compact'})+(release.platform==='ios'?'iOS':release.platform==='macos'?'macOS':escapeHTML(release.platform))+' · '+channelNames[release.channel]+'</span><div class="meta">build '+release.build+' · '+formatDate(release.created_at)+'</div></div>'+
+    '</div>'+
     '<span class="meta">'+formatSize(release.size)+'</span>'+
    '</div>'+
    '<p>'+escapeHTML(release.notes||'暂无更新说明')+'</p>'+

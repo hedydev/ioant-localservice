@@ -1,7 +1,7 @@
 
 import {$,state,api,escapeHTML,formatDate} from './core.js';
 import {buildState} from './build-state.js';
-import {platformIcons,targetsForJob} from './platform-ui.js';
+import {platformIcons,targetsForJob,buildAppIcon} from './platform-ui.js';
 
 function logElement(jobID){
  return document.getElementById('build-log-'+jobID);
@@ -35,15 +35,23 @@ function chooseRunningLog(jobs){
  buildState.logScrollTop=0;
 }
 
+function laneFor(job){
+ return job.lane||job.result?.lane||job.profile_id||'';
+}
+
 function stageLabel(job){
  const stages={
   preflight:'预检查',pull:'正在拉取',build:'正在构建',archive:'正在归档',validate:'正在验证',
   export:'正在导出',package:'正在打包',notarize:'正在公证',upload:'正在上传',
-  publish:'正在发布到 ILS',submitted:'已提交',processing:'Apple 处理中',
-  metadata:'读取版本',script:'项目脚本执行中',complete:'完成'
+  publish:'正在发布到 ILS',submitted:'已提交到 App Store Connect',processing:'Apple Processing',
+  available:'TestFlight 可测试',metadata:'读取版本',script:'项目脚本执行中',complete:'完成'
  };
  if(job.status==='running')return stages[job.stage]||'处理中';
- if(job.status==='succeeded'&&job.result?.lane==='ios-testflight')return 'TestFlight 已提交';
+ if(job.status==='succeeded'&&laneFor(job)==='ios-testflight'){
+  if(job.stage==='available')return 'TestFlight 可测试';
+  if(job.stage==='processing')return 'Apple Processing';
+  return '已提交到 App Store Connect';
+ }
  if(job.status==='succeeded')return '发布成功';
  return '失败';
 }
@@ -61,31 +69,51 @@ function resultView(job){
  if(!job.result)return '';
  const result=job.result;
  if(result.lane==='ios-testflight'){
-  return '<div class="submission-result"><strong>TestFlight</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(result.submission_result||result.status)+'</span><small>上传成功不等于 Apple 已完成 Processing。</small></div>';
+  let stateText='已提交到 App Store Connect';
+  if(job.stage==='processing')stateText='Apple Processing';
+  if(job.stage==='available')stateText='TestFlight 可测试';
+  const link=job.status==='succeeded'&&job.testflight_url
+   ?'<a class="testflight-link" href="'+escapeHTML(job.testflight_url)+'">在 TestFlight 中打开</a>'
+   :'';
+  return '<div class="submission-result"><strong>TestFlight</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(stateText)+'</span>'+
+   '<small>'+(job.stage==='available'
+    ?'Apple 状态源已确认此构建可供 TestFlight 测试。'
+    :job.stage==='processing'
+     ?'Apple 状态源已确认正在 Processing；尚未确认可供测试。'
+     :'App Store Connect 已接受上传；ILS 当前没有 Apple Processing / 可测试状态查询结果，因此不会把提交成功显示成可测试。')+'</small>'+link+'</div>';
  }
  return '<div class="meta">结果：'+escapeHTML(result.lane||'artifact')+' · '+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</div>';
 }
 
 function pipelineView(job){
  const lanes={
-  'ios-testflight':['pull','preflight','archive','validate','upload','complete'],
+  'ios-testflight':['pull','preflight','archive','validate','upload','submitted','processing','available'],
   'ios-adhoc':['pull','preflight','archive','validate','export','publish','complete'],
   'macos-test':['pull','preflight','build','package','validate','publish','complete'],
   'macos-release':['pull','preflight','build','package','notarize','validate','publish','complete']
  };
  const labels={
   pull:'拉取',preflight:'预检查',build:'构建',archive:'归档',validate:'验证',
-  export:'导出',package:'打包',notarize:'公证',upload:'上传',publish:'发布',complete:'完成'
+  export:'导出',package:'打包',notarize:'公证',upload:'上传',publish:'发布',
+  submitted:'已提交到 App Store Connect',processing:'Apple Processing',
+  available:'TestFlight 可测试',complete:'完成'
  };
- const lane=job.result?.lane||job.profile_id||'';
+ const lane=laneFor(job);
  const stages=lanes[lane]||['pull','build','validate','publish','complete'];
- const current=stages.indexOf(job.stage);
+ let currentStage=job.stage;
+ if(lane==='ios-testflight'&&job.status==='succeeded'&&currentStage==='complete')currentStage='submitted';
+ const current=stages.indexOf(currentStage);
  return '<div class="pipeline" aria-label="构建流水线">'+stages.map((stage,index)=>{
-  let state='pending';
-  if(index<current)state='done';
-  else if(index===current)state=job.status==='failed'?'failed':job.status==='succeeded'?'done':'active';
-  else if(job.status==='succeeded'&&stage==='complete')state='done';
-  return '<span class="pipeline-step '+state+'">'+escapeHTML(labels[stage]||stage)+'</span>';
+  let stepState='pending';
+  if(index<current)stepState='done';
+  else if(index===current){
+   if(job.status==='failed')stepState='failed';
+   else if(job.status==='running')stepState='active';
+   else if(lane==='ios-testflight'&&currentStage==='processing')stepState='active';
+   else stepState='done';
+  }
+  if(lane==='ios-testflight'&&job.status==='succeeded'&&currentStage==='submitted'&&index>current)stepState='waiting';
+  return '<span class="pipeline-step '+stepState+'">'+escapeHTML(labels[stage]||stage)+'</span>';
  }).join('<span class="pipeline-arrow">→</span>')+'</div>';
 }
 
@@ -107,7 +135,7 @@ function renderJobs(jobs){
    '<div class="build-job-row">'+
     '<div class="build-job-main">'+
      '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
-     '<div class="build-title-row"><strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
+     '<div class="build-title-row">'+buildAppIcon(job,{className:'job-app-icon',title:job.title||'App Icon'})+'<strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
      '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
      pipelineView(job)+
      (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+

@@ -1,7 +1,7 @@
 
 import {$,state,api,notice,needAdmin,escapeHTML,formatSize,channelNames} from './core.js';
 import {refreshData} from './projects.js';
-import {platformIcons,targetsForRelease} from './platform-ui.js';
+import {platformIcons,targetsForRelease,releaseAppIcon} from './platform-ui.js';
 
 function iosInstallNote(release){
  const info=release.ios;
@@ -33,7 +33,7 @@ function renderPublicIOS(){
    :'';
   const download='<a class="download '+(install?'secondary':'')+'" href="'+escapeHTML(release.download_url)+'">下载 IPA</a>';
   return '<article class="release ios-install-release">'+
-   '<div class="release-top"><div><strong>'+platformIcons(targetsForRelease(release))+escapeHTML(release.version)+'</strong> <span class="badge">'+escapeHTML(channelNames[release.channel]||release.channel)+'</span><div class="meta">build '+release.build+'</div></div><span class="meta">'+formatSize(release.size)+'</span></div>'+
+   '<div class="release-top"><div class="release-identity">'+releaseAppIcon(release,{className:'release-app-icon',title:'App Icon'})+'<div><strong>'+platformIcons(targetsForRelease(release))+escapeHTML(release.version)+'</strong> <span class="badge">'+escapeHTML(channelNames[release.channel]||release.channel)+'</span><div class="meta">build '+release.build+'</div></div></div><span class="meta">'+formatSize(release.size)+'</span></div>'+
    '<p>'+escapeHTML(release.notes||'暂无更新说明')+'</p>'+
    '<p class="meta">'+escapeHTML(iosInstallNote(release))+'</p>'+
    '<div class="download-row">'+install+download+'</div>'+

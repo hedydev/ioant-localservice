@@ -141,3 +141,29 @@ The icons are local inline SVG outlines and do not depend on external fonts or i
 For published IPA files, ILS reads `UIDeviceFamily` from the IPA's app `Info.plist` and exposes detected device targets through `ios.device_targets`, so release-history icons can distinguish iPhone and iPad support from artifact evidence. UI code should prefer explicit target metadata when available and use platform defaults only when target-level metadata is unavailable.
 
 When Android distribution is added, extend the backend platform contract and target metadata; the visual renderer already has an Android target and should remain the single icon implementation.
+
+
+## TestFlight task semantics
+
+The TestFlight build pipeline separates upload acceptance from later Apple states:
+
+```text
+upload
+→ submitted to App Store Connect
+→ Apple Processing
+→ TestFlight available
+```
+
+A successful Xcode upload or `ils-result-v1` result with `status=submitted` stops at **submitted to App Store Connect**. ILS must not mark Processing or tester availability unless a connected Apple status source proves those states. The current implementation has no App Store Connect processing-status query, so successful submissions remain visibly waiting for Apple Processing.
+
+An `ios-testflight` Release Profile may store an optional `testflight_url` using Apple's `https://testflight.apple.com/join/...` invitation form. The build job snapshots that URL when it starts. Only a successful TestFlight job renders **在 TestFlight 中打开**; Ad Hoc and macOS jobs never receive that action.
+
+## App Icon presentation
+
+App Icon artwork is separate from the Mac/iPhone/iPad platform-outline glyphs.
+
+ILS keeps a platform-specific project icon cache. When a linked Git source is inspected or pulled, ILS scans tracked `*.appiconset/Contents.json` catalogs and caches the best iOS and macOS PNG independently. It does not hard-code a product name or image path. Release Profiles use the current project cache; each new Build Job snapshots the platform icon into its own job directory so later source icon changes do not rewrite that task's presentation.
+
+For published iOS IPA files, ILS additionally extracts the largest usable compiled main-app App Icon PNG when available. Every new local Release snapshots an icon into release-specific storage; macOS and fallback releases use the current platform-specific project cache. Existing releases are backfilled lazily from their retained artifact/cache when possible. Release History and the iOS install list use the release snapshot.
+
+If no usable icon is available, the UI omits the App Icon and keeps the platform glyphs.

@@ -41,6 +41,7 @@ type ReleaseProfile struct {
 	Lane               string `json:"lane,omitempty"`
 	ResultContract     string `json:"result_contract,omitempty"`
 	AppleTeamID        string `json:"apple_team_id,omitempty"`
+	TestFlightURL      string `json:"testflight_url,omitempty"`
 	BuildCommand       string `json:"build_command"`
 	PackageCommand     string `json:"package_command,omitempty"`
 	Artifact           string `json:"artifact,omitempty"`
@@ -64,8 +65,11 @@ type BuildJob struct {
 	Mode       string       `json:"mode,omitempty"`
 	Script     string       `json:"script,omitempty"`
 	ProfileID  string       `json:"profile_id,omitempty"`
-	Title      string       `json:"title,omitempty"`
-	Status     string       `json:"status"`
+	Title         string       `json:"title,omitempty"`
+	Platform      string       `json:"platform,omitempty"`
+	Lane          string       `json:"lane,omitempty"`
+	TestFlightURL string       `json:"testflight_url,omitempty"`
+	Status        string       `json:"status"`
 	Stage      string       `json:"stage"`
 	StageState string       `json:"stage_state,omitempty"`
 	Progress   *int         `json:"progress,omitempty"`
@@ -255,6 +259,7 @@ func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
 	p.Lane = strings.TrimSpace(p.Lane)
 	p.ResultContract = strings.TrimSpace(p.ResultContract)
 	p.AppleTeamID = strings.ToUpper(strings.TrimSpace(p.AppleTeamID))
+	p.TestFlightURL = strings.TrimSpace(p.TestFlightURL)
 	p.BuildCommand = strings.TrimSpace(p.BuildCommand)
 	p.PackageCommand = strings.TrimSpace(p.PackageCommand)
 	p.Artifact = strings.TrimSpace(p.Artifact)
@@ -289,6 +294,18 @@ func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
 	}
 	if p.Lane == "ios-testflight" && p.ResultContract != "ils-result-v1" {
 		return p, fmt.Errorf("TestFlight Profile 必须使用 ils-result-v1")
+	}
+	if p.TestFlightURL != "" {
+		if p.Lane != "ios-testflight" {
+			return p, fmt.Errorf("TestFlight 链接只能配置在 ios-testflight lane")
+		}
+		u, e := url.Parse(p.TestFlightURL)
+		if e != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, "testflight.apple.com") || !strings.HasPrefix(u.Path, "/join/") || u.User != nil || u.Fragment != "" {
+			return p, fmt.Errorf("TestFlight 链接必须是 https://testflight.apple.com/join/... 邀请链接")
+		}
+	}
+	if len(p.TestFlightURL) > 2048 {
+		return p, fmt.Errorf("TestFlight 链接过长")
 	}
 	if p.BuildCommand == "" || len(p.BuildCommand) > 32768 || len(p.PackageCommand) > 32768 {
 		return p, fmt.Errorf("需要有效的构建命令")
@@ -389,6 +406,7 @@ func (a *App) buildSource(w http.ResponseWriter, r *http.Request) {
 			fail(w, 409, e.Error())
 			return
 		}
+		a.refreshProjectIcons(id, info.Path)
 		respond(w, 200, info)
 		return
 	}
@@ -423,6 +441,7 @@ func (a *App) buildSource(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "保存项目目录失败")
 		return
 	}
+	a.refreshProjectIcons(id, info.Path)
 	respond(w, 200, info)
 }
 func atomicJSON(path string, value any) error {
@@ -465,6 +484,7 @@ func (a *App) startBuild(w http.ResponseWriter, r *http.Request) {
 	info, e := inspectSource(source)
 	if e != nil { fail(w, 409, e.Error()); return }
 	if info.Blocker != "" { fail(w, 409, info.Blocker); return }
+	a.refreshProjectIcons(id, info.Path)
 	var profile *ReleaseProfile
 	mode, title := "script", input.Script
 	if input.Profile != "" {
@@ -482,7 +502,17 @@ func (a *App) startBuild(w http.ResponseWriter, r *http.Request) {
 	a.buildMu.Lock()
 	if a.activeBuild != "" { a.buildMu.Unlock(); fail(w, 409, "已有构建正在执行，请稍后发布"); return }
 	j := BuildJob{ID: randomID(16), ProjectID: id, Mode: mode, Script: input.Script, ProfileID: input.Profile, Title: title, Status: "running", Stage: "pull", CreatedAt: time.Now().UTC(), ReleaseIDs: []string{}}
-	if e = os.MkdirAll(filepath.Dir(a.buildJobPath(j.ID)), 0700); e == nil { e = atomicJSON(a.buildJobPath(j.ID), j) }
+	if profile != nil {
+		j.Platform = profile.Platform
+		j.Lane = profile.Lane
+		j.TestFlightURL = profile.TestFlightURL
+	}
+	if e = os.MkdirAll(filepath.Dir(a.buildJobPath(j.ID)), 0700); e == nil {
+		if j.Platform != "" {
+			a.snapshotBuildIcon(j.ProjectID, j.Platform, j.ID)
+		}
+		e = atomicJSON(a.buildJobPath(j.ID), j)
+	}
 	if e != nil { a.buildMu.Unlock(); fail(w, 500, "创建构建任务失败"); return }
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	a.activeBuild = j.ID; a.cancelBuild = cancel; a.buildReceipts = map[string][]string{j.ID: {}}
@@ -568,7 +598,7 @@ func (a *App) buildLog(w http.ResponseWriter, r *http.Request) {
 var buildEventStages = map[string]bool{
 	"preflight": true, "pull": true, "build": true, "archive": true, "validate": true,
 	"export": true, "package": true, "notarize": true, "upload": true,
-	"submitted": true, "processing": true, "complete": true,
+	"submitted": true, "processing": true, "available": true, "complete": true,
 }
 var buildEventStates = map[string]bool{
 	"queued": true, "started": true, "running": true, "succeeded": true, "failed": true,
@@ -881,6 +911,10 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 	if e!=nil || info.Blocker!="" { finish("failed","拉取后的 Git 状态不满足发布条件，请重新扫描"); return }
 	upstreamHead,e:=gitRead(source.Path,"rev-parse","@{upstream}")
 	if e!=nil || info.Head!=upstreamHead { finish("failed","本地 HEAD 与 upstream 不一致，请先由开发者处理"); return }
+	a.refreshProjectIcons(j.ProjectID, source.Path)
+	if j.Platform != "" {
+		a.snapshotBuildIcon(j.ProjectID, j.Platform, j.ID)
+	}
 	if profile==nil {
 		ready:=false; for _,x:=range info.Scripts { if x.Path==j.Script && x.Ready { ready=true } }
 		if !ready { finish("failed","拉取后脚本已删除或说明不完整，请重新扫描"); return }
@@ -935,11 +969,13 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 			artifact,resultErr=validateContractResult(*profile,result,output)
 			if resultErr!=nil { finish("failed",resultErr.Error()); return }
 			j.Result=&result
+			j.Platform=result.Platform
+			j.Lane=result.Lane
 			version,build=result.Version,result.Build
 			_=a.writeBuild(j)
 			if profile.Lane=="ios-testflight" {
-				j.Stage="complete"; j.StageState="succeeded"; j.Progress=nil
-				if j.Message=="" { j.Message="App Store Connect 已接受上传；等待 Apple 处理" }
+				j.Stage="submitted"; j.StageState="succeeded"; j.Progress=nil
+				j.Message="已提交到 App Store Connect；等待 Apple Processing"
 				finish("succeeded","")
 				return
 			}

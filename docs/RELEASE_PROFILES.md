@@ -63,6 +63,7 @@ ILS then runs `git pull --ff-only` with Git hooks and autostash disabled. It doe
 | `lane` | `ios-adhoc`, `ios-testflight`, `macos-test`, or `macos-release` |
 | `result_contract` | Preferred: `ils-result-v1`; empty keeps legacy artifact-field behavior |
 | `apple_team_id` | Optional 10-character Apple Team ID. ILS exposes detected local signing teams in the Profile UI and exports the selected value as `ILS_APPLE_TEAM_ID`. Required by the UI when multiple signing teams are detected for an iOS profile. |
+| `testflight_url` | Optional Apple TestFlight invitation URL. Valid only for `ios-testflight` and must use `https://testflight.apple.com/join/...`. The value is snapshotted into the build job for the **在 TestFlight 中打开** action. |
 | `build_command` | Shell command executed from the linked project directory |
 | `package_command` | Optional second command |
 | `artifact` | Legacy mode only: relative artifact path/glob or path under `$ILS_OUTPUT_DIR` |
@@ -162,7 +163,7 @@ Example:
 
 For this lane ILS requires an explicit successful App Store Connect submission result and **does not create a fake local release record**.
 
-The job UI reports the upload as submitted. This is intentionally different from “TestFlight available”: App Store Connect may still be processing the build. ILS may show `processing` or `available` only when a future/connected Apple status source provides evidence.
+The job UI reports the upload as **submitted to App Store Connect**. This is intentionally different from “TestFlight available”: App Store Connect may still be processing the build. The task pipeline leaves **Apple Processing** and **TestFlight available** unresolved until a future/connected Apple status source provides evidence.
 
 ## Recommended profiles
 

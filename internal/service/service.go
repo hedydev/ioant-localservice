@@ -49,6 +49,7 @@ type Release struct {
 	IOS          *IOSInfo  `json:"ios,omitempty"`
 	DownloadURL  string    `json:"download_url"`
 	InstallURL   string    `json:"install_url,omitempty"`
+	AppIconURL   string    `json:"app_icon_url,omitempty"`
 }
 type state struct {
 	Projects []Project `json:"projects"`
@@ -190,6 +191,9 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/projects", a.createProject)
 	mux.HandleFunc("GET /api/projects/{project}/releases", a.listReleases)
 	mux.HandleFunc("POST /api/projects/{project}/releases", a.upload)
+	mux.HandleFunc("GET /api/projects/{project}/icon", a.projectIcon)
+	mux.HandleFunc("GET /api/builds/{job}/icon", a.buildIcon)
+	mux.HandleFunc("GET /api/releases/{release}/icon", a.releaseIcon)
 	mux.HandleFunc("GET /api/projects/{project}/updates", a.updates)
 	mux.HandleFunc("GET /api/releases/{release}/download", a.download)
 	mux.HandleFunc("GET /api/releases/{release}/manifest.plist", a.manifest)
@@ -267,6 +271,12 @@ func (a *App) projectExists(id string) bool {
 }
 func (a *App) decorated(v Release) Release {
 	v.DownloadURL = "/api/releases/" + v.ID + "/download"
+	if _, e := os.Stat(a.releaseIconPath(v.ID)); os.IsNotExist(e) {
+		a.snapshotReleaseIcon(v, filepath.Join(a.data, "artifacts", v.ID))
+	}
+	if _, e := os.Stat(a.releaseIconPath(v.ID)); e == nil {
+		v.AppIconURL = "/api/releases/" + v.ID + "/icon"
+	}
 	if a.publicURL != "" && v.IOS != nil && v.IOS.OTAEligible() {
 		v.InstallURL = "itms-services://?action=download-manifest&url=" + url.QueryEscape(a.publicURL+"/api/releases/"+v.ID+"/manifest.plist")
 	}
@@ -432,6 +442,9 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	for _, x := range a.state.Releases {
 		if x.Variant == v.Variant && x.ProjectID == id && x.Version == v.Version && x.Build == v.Build && x.Platform == v.Platform && x.Channel == v.Channel && x.Architecture == v.Architecture {
 			if x.SHA256 == v.SHA256 {
+				if _, iconErr := os.Stat(a.releaseIconPath(x.ID)); os.IsNotExist(iconErr) {
+					a.snapshotReleaseIcon(x, temp)
+				}
 				a.recordBuildPublication(fields["job_id"], id, x.ID)
 				respond(w, 200, a.decorated(x))
 				return
@@ -446,9 +459,11 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	temp = ""
+	a.snapshotReleaseIcon(v, dest)
 	next := state{Projects: a.state.Projects, Releases: append(append([]Release{}, a.state.Releases...), v)}
 	if e := a.save(next); e != nil {
 		_ = os.Remove(dest)
+		_ = os.Remove(a.releaseIconPath(v.ID))
 		fail(w, 500, "版本保存失败")
 		return
 	}

@@ -33,20 +33,24 @@ func (i *IOSInfo) OTAEligible() bool {
 
 var appInfoRE = regexp.MustCompile(`^Payload/[^/]+\.app/Info\.plist$`)
 
-func readZip(f *zip.File) ([]byte, error) {
-	if f.UncompressedSize64 > 4<<20 {
-		return nil, fmt.Errorf("描述文件过大")
+func readZipLimit(f *zip.File, max int64) ([]byte, error) {
+	if f.UncompressedSize64 > uint64(max) {
+		return nil, fmt.Errorf("ZIP 条目过大")
 	}
 	r, e := f.Open()
 	if e != nil {
 		return nil, e
 	}
 	defer r.Close()
-	b, e := io.ReadAll(io.LimitReader(r, (4<<20)+1))
-	if len(b) > 4<<20 {
-		return nil, fmt.Errorf("描述文件过大")
+	b, e := io.ReadAll(io.LimitReader(r, max+1))
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("ZIP 条目过大")
 	}
 	return b, e
+}
+
+func readZip(f *zip.File) ([]byte, error) {
+	return readZipLimit(f, 4<<20)
 }
 func plistJSON(raw []byte, out any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -173,4 +177,56 @@ func inspectIPA(path string) (*IOSInfo, error) {
 		break
 	}
 	return out, nil
+}
+
+
+func extractIPAAppIcon(path string) ([]byte, error) {
+	z, e := zip.OpenReader(path)
+	if e != nil {
+		return nil, e
+	}
+	defer z.Close()
+
+	var prefix string
+	for _, f := range z.File {
+		if appInfoRE.MatchString(f.Name) {
+			prefix = strings.TrimSuffix(f.Name, "Info.plist")
+			break
+		}
+	}
+	if prefix == "" {
+		return nil, fmt.Errorf("IPA 缺少主应用")
+	}
+
+	var best []byte
+	var bestScore uint64
+	for _, f := range z.File {
+		if !strings.HasPrefix(f.Name, prefix) {
+			continue
+		}
+		relative := strings.TrimPrefix(f.Name, prefix)
+		if relative == "" || strings.Contains(relative, "/") || !strings.HasSuffix(strings.ToLower(relative), ".png") {
+			continue
+		}
+		name := strings.ToLower(relative)
+		if !strings.Contains(name, "appicon") && !strings.HasPrefix(name, "icon") {
+			continue
+		}
+		raw, e := readZipLimit(f, maxAppIconBytes)
+		if e != nil || !pngBytes(raw) {
+			continue
+		}
+		score := f.UncompressedSize64
+		if strings.Contains(name, "appicon") {
+			score += 1 << 40
+		}
+		if score > bestScore {
+			bestScore = score
+			best = raw
+		}
+	}
+	if len(best) == 0 {
+		return nil, fmt.Errorf("IPA 未找到可用 App Icon PNG")
+	}
+	return best, nil
 }

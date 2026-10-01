@@ -55,3 +55,41 @@ func TestEventLogIgnoresXcodeProgressWithoutXcodeStage(t *testing.T) {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
 }
+
+
+func TestNormalizeReleaseProfileTestFlightLink(t *testing.T) {
+	base := ReleaseProfile{
+		ID:             "ios-testflight",
+		Name:           "iOS TestFlight",
+		Platform:       "ios",
+		Architecture:   "arm64",
+		Channel:        "beta",
+		Variant:        "default",
+		Lane:           "ios-testflight",
+		ResultContract: "ils-result-v1",
+		BuildCommand:   "bash scripts/ils-build-ios.sh --testflight",
+	}
+
+	valid := base
+	valid.TestFlightURL = "https://testflight.apple.com/join/AbCd1234"
+	got, err := normalizeReleaseProfile(valid)
+	if err != nil {
+		t.Fatalf("normalize valid TestFlight URL: %v", err)
+	}
+	if got.TestFlightURL != valid.TestFlightURL {
+		t.Fatalf("TestFlightURL = %q, want %q", got.TestFlightURL, valid.TestFlightURL)
+	}
+
+	badHost := base
+	badHost.TestFlightURL = "https://example.com/join/AbCd1234"
+	if _, err := normalizeReleaseProfile(badHost); err == nil {
+		t.Fatal("expected non-Apple TestFlight URL to fail")
+	}
+
+	wrongLane := base
+	wrongLane.Lane = "ios-adhoc"
+	wrongLane.TestFlightURL = valid.TestFlightURL
+	if _, err := normalizeReleaseProfile(wrongLane); err == nil {
+		t.Fatal("expected TestFlight URL on non-TestFlight lane to fail")
+	}
+}

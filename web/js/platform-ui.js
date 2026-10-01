@@ -47,6 +47,7 @@ export function targetsForJob(job){
  const explicit=job?.device_targets||job?.result?.device_targets;
  if(explicit?.length)return uniqueTargets(explicit);
  if(job?.result?.platform)return targetsForPlatform(job.result.platform);
+ if(job?.platform)return targetsForPlatform(job.platform);
  const key=(job?.profile_id||'')+' '+(job?.title||'');
  if(/ios/i.test(key))return ['iphone','ipad'];
  if(/macos|mac\s/i.test(key))return ['mac'];
@@ -63,6 +64,32 @@ export function platformIcons(targets,{className=''}={}){
  '</span>';
 }
 
+function escapeAttribute(value){
+ return String(value??'').replace(/[&<>"']/g,char=>({
+  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+ })[char]);
+}
+
+export function appIcon(src,{className='',title=''}={}){
+ if(!src)return '';
+ return '<img data-app-icon class="app-icon '+escapeAttribute(className)+'" src="'+escapeAttribute(src)+'" alt="" loading="lazy"'+
+  (title?' title="'+escapeAttribute(title)+'"':'')+'>';
+}
+
+export function projectAppIcon(project,platform,options={}){
+ if(!project||!['ios','macos'].includes(platform))return '';
+ return appIcon('/api/projects/'+encodeURIComponent(project)+'/icon?platform='+encodeURIComponent(platform),options);
+}
+
+export function buildAppIcon(job,options={}){
+ if(!job?.id)return '';
+ return appIcon('/api/builds/'+encodeURIComponent(job.id)+'/icon',options);
+}
+
+export function releaseAppIcon(release,options={}){
+ return appIcon(release?.app_icon_url||'',options);
+}
+
 export function decoratePlatformIcons(root=document){
  root.querySelectorAll('[data-platform-targets]').forEach(slot=>{
   const targets=(slot.dataset.platformTargets||'').trim().split(/\s+/).filter(Boolean);
@@ -72,6 +99,10 @@ export function decoratePlatformIcons(root=document){
 
 export function initPlatformUI(){
  decoratePlatformIcons();
+ document.addEventListener('error',event=>{
+  const image=event.target;
+  if(image?.matches?.('img[data-app-icon]'))image.hidden=true;
+ },true);
  window.addEventListener('admin-loaded',()=>decoratePlatformIcons());
  window.addEventListener('data-refreshed',()=>decoratePlatformIcons());
 }
