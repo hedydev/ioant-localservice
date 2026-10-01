@@ -43,7 +43,31 @@ function resultView(job){
  return '<div class="meta">结果：'+escapeHTML(result.lane||'artifact')+' · '+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</div>';
 }
 
+function pipelineView(job){
+ const lanes={
+  'ios-testflight':['pull','preflight','archive','validate','upload','complete'],
+  'ios-adhoc':['pull','preflight','archive','validate','export','publish','complete'],
+  'macos-test':['pull','preflight','build','package','validate','publish','complete'],
+  'macos-release':['pull','preflight','build','package','notarize','validate','publish','complete']
+ };
+ const labels={
+  pull:'拉取',preflight:'预检查',build:'构建',archive:'归档',validate:'验证',
+  export:'导出',package:'打包',notarize:'公证',upload:'上传',publish:'发布',complete:'完成'
+ };
+ const lane=job.result?.lane||job.profile_id||'';
+ const stages=lanes[lane]||['pull','build','validate','publish','complete'];
+ const current=stages.indexOf(job.stage);
+ return '<div class="pipeline" aria-label="构建流水线">'+stages.map((stage,index)=>{
+  let state='pending';
+  if(index<current)state='done';
+  else if(index===current)state=job.status==='failed'?'failed':job.status==='succeeded'?'done':'active';
+  else if(job.status==='succeeded'&&stage==='complete')state='done';
+  return '<span class="pipeline-step '+state+'">'+escapeHTML(labels[stage]||stage)+'</span>';
+ }).join('<span class="pipeline-arrow">→</span>')+'</div>';
+}
+
 function renderJobs(jobs){
+ jobs=[...jobs].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
  if(!jobs.length){
   $('#build-jobs').innerHTML='<div class="empty"><strong>还没有构建任务</strong>运行 Release Profile 后，任务状态会显示在这里。</div>';
   return;
@@ -52,8 +76,10 @@ function renderJobs(jobs){
   const releases=job.release_ids||[];
   return '<article class="build-job">'+
    '<div class="build-job-main">'+
-    '<div><strong>'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
-    '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · '+formatDate(job.created_at)+' · '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
+    '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
+    '<div class="build-title-row"><strong>'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
+    '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
+    pipelineView(job)+
     (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+
     progressView(job)+
     (job.error?'<p>'+escapeHTML(job.error)+'</p>':'')+
