@@ -61,19 +61,11 @@
     </div>
 
     <article class="panel-card">
-      <div class="section-heading"><div><h2>项目来源</h2><span class="meta">Git source</span></div></div>
-      <form id="source-form" class="inline-form">
-        <div class="source-folder">
-          <label for="project-folder">Mac 项目文件夹</label>
-          <div class="folder-input">
-            <input id="project-folder" name="path" placeholder="选择文件夹，或输入项目绝对路径" required>
-            <button id="choose-project-folder" type="button">选择文件夹…</button>
-          </div>
-        </div>
-        <label>发布分支<input name="branch" value="main" required></label>
-        <button type="submit">关联目录</button>
-      </form>
-      <p id="source-info">关联 Git 项目后，可以配置 ILS Release Profile。</p>
+      <div class="section-heading">
+        <div><h2>项目来源</h2><span class="meta">Git source</span></div>
+        <button id="configure-source" type="button">配置项目来源</button>
+      </div>
+      <div id="source-info" class="persistent-config-summary">正在读取项目来源…</div>
       <div id="build-scripts"></div>
     </article>
 
@@ -162,28 +154,17 @@
     </article>
 
     <article class="panel-card" data-admin hidden>
-      <div class="section-heading"><div><h2>App Store Connect 状态同步</h2><span class="meta">管理员 · TestFlight</span></div></div>
-      <p>配置 API Key 后，ILS 会查询 TestFlight 的 Apple Processing、内部/外部 Beta 状态和 Beta Group public link，并把状态同步到同一套发布记录中。ILS 只保存 Key ID、Issuer ID 和这台 Mac 上的 .p8 路径，不保存私钥内容。</p>
-      <form id="asc-form">
-        <div class="form-grid">
-          <label>Key ID<input name="key_id" maxlength="10" placeholder="2X9R4HXF34" autocomplete="off" required></label>
-          <label>Issuer ID <span class="meta">Team Key 必填；Individual Key 留空</span><input name="issuer_id" maxlength="128" autocomplete="off"></label>
-        </div>
-        <label>Private Key (.p8)
-          <div class="folder-input">
-            <input name="private_key_path" placeholder="/Users/you/Downloads/AuthKey_XXXXXXXXXX.p8" autocomplete="off" required>
-            <button id="asc-choose-key" type="button">选择 .p8…</button>
-          </div>
-        </label>
-        <div class="profile-actions">
-          <button type="submit" class="primary">保存并验证</button>
-          <button id="asc-check" type="button">验证连接</button>
-          <button id="asc-refresh" type="button">刷新发布状态</button>
-          <button id="asc-delete" type="button" class="danger">移除配置</button>
-        </div>
-      </form>
+      <div class="section-heading">
+        <div><h2>App Store Connect 状态同步</h2><span class="meta">管理员 · TestFlight</span></div>
+        <button id="asc-configure" type="button">配置 App Store Connect</button>
+      </div>
+      <p>ILS 会查询 Build Upload、Apple Processing、内部/外部 Beta 状态和 Beta Group public link，并同步到同一套 Release 记录。</p>
       <div id="asc-status" role="status">正在读取 App Store Connect 配置…</div>
-      <p class="meta">Team API Key 在 App Store Connect → Users and Access → Integrations 创建；Individual API Key 在个人资料中创建。Individual Key 可用于状态同步；xcodebuild 上传仍使用已登录的 Xcode 账号。.p8 私钥只可下载一次，请保存在这台 Mac 的受保护目录，不要提交到 Git。</p>
+      <div class="persistent-config-actions">
+        <button id="asc-check" type="button">验证连接</button>
+        <button id="asc-refresh" type="button">刷新发布状态</button>
+      </div>
+      <p class="meta">API Key 和 .p8 路径属于低频配置；主页面只保留当前状态和日常同步操作。</p>
     </article>
   </section>
 
@@ -217,6 +198,43 @@
   <p>用于自动上传接口；仅小写字母、数字、连字符。</p>
   <p class="form-error" role="alert"></p>
   <button type="submit" class="primary">创建项目</button>
+</form></dialog>
+
+<dialog data-admin hidden id="source-dialog"><form id="source-form">
+  <div class="dialog-heading"><h2>配置项目来源</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div>
+  <p>项目来源通常只需配置一次。ILS 不会自动切换分支、stash、reset 或 clean。</p>
+  <label for="project-folder">Mac 项目文件夹
+    <div class="folder-input">
+      <input id="project-folder" name="path" placeholder="选择文件夹，或输入项目绝对路径" required>
+      <button id="choose-project-folder" type="button">选择文件夹…</button>
+    </div>
+  </label>
+  <label>发布分支<input name="branch" value="main" required></label>
+  <p id="source-dialog-status" class="meta"></p>
+  <p class="form-error" role="alert"></p>
+  <button type="submit" class="primary">保存项目来源</button>
+</form></dialog>
+
+<dialog data-admin hidden id="asc-dialog"><form id="asc-form">
+  <div class="dialog-heading"><h2>配置 App Store Connect</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div>
+  <p>ILS 只保存 Key ID、Issuer ID 和这台 Mac 上的 .p8 路径，不保存私钥内容。</p>
+  <div class="form-grid">
+    <label>Key ID<input name="key_id" maxlength="10" placeholder="2X9R4HXF34" autocomplete="off" required></label>
+    <label>Issuer ID <span class="meta">Team Key 必填；Individual Key 留空</span><input name="issuer_id" maxlength="128" autocomplete="off"></label>
+  </div>
+  <label>Private Key (.p8)
+    <div class="folder-input">
+      <input name="private_key_path" placeholder="/Users/you/.config/ils/app-store-connect/AuthKey_XXXXXXXXXX.p8" autocomplete="off" required>
+      <button id="asc-choose-key" type="button">选择 .p8…</button>
+    </div>
+  </label>
+  <p class="meta">Team API Key 在 App Store Connect → Users and Access → Integrations 创建。建议 .p8 权限为 0600。</p>
+  <p id="asc-dialog-status" class="meta" role="status"></p>
+  <p class="form-error" role="alert"></p>
+  <div class="dialog-actions">
+    <button id="asc-delete" type="button" class="danger">移除配置</button>
+    <button type="submit" class="primary">保存并验证</button>
+  </div>
 </form></dialog>
 
 <dialog data-admin hidden id="profile-dialog"><form id="profile-form">

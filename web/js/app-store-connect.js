@@ -1,15 +1,22 @@
 import {$,state,api,notice,escapeHTML,formatDate} from './core.js';
 import {refreshData} from './projects.js';
 
-function renderStatus(status){
+let currentStatus=null;
+
+function populateConfigForm(status=currentStatus){
  const form=$('#asc-form');
- if(!form)return;
- if(status.configured){
+ form.reset();
+ form.querySelector('.form-error').textContent='';
+ $('#asc-dialog-status').textContent='';
+ if(status?.configured){
   form.elements.key_id.value=status.key_id||'';
   form.elements.issuer_id.value=status.issuer_id||'';
   form.elements.private_key_path.value=status.private_key_path||'';
  }
+}
 
+function renderStatus(status){
+ currentStatus=status;
  const container=$('#asc-status');
  if(!status.configured){
   container.innerHTML='<div class="asc-status-card unconfigured"><div class="asc-status-head"><strong>尚未配置 App Store Connect API Key</strong><span class="release-status status-submitted">需要配置</span></div><p>TestFlight 仍可通过 Xcode 已登录账号上传，但 ILS 无法自动读取 Apple Processing、Beta 状态和 Public Link。</p></div>';
@@ -34,6 +41,7 @@ function renderStatus(status){
    (status.last_error?'<p class="form-error">'+escapeHTML(status.last_error)+'</p>':'')+
   '</div>';
  }
+ $('#asc-configure').textContent=status.configured?'编辑 App Store Connect':'配置 App Store Connect';
  $('#asc-refresh').disabled=!status.configured||status.refreshing;
  $('#asc-check').disabled=!status.configured||status.refreshing;
  $('#asc-delete').disabled=!status.configured||status.refreshing;
@@ -73,6 +81,8 @@ async function refreshStatus({announce=true}={}){
 async function saveConfig(form){
  const button=form.querySelector('[type=submit]');
  button.disabled=true;
+ form.querySelector('.form-error').textContent='';
+ $('#asc-dialog-status').textContent='正在保存并验证…';
  try{
   const status=await api('/api/app-store-connect/config',{
    method:'POST',
@@ -81,6 +91,7 @@ async function saveConfig(form){
   });
   renderStatus(status);
   if(status.connected){
+   $('#asc-dialog').close();
    try{
     const result=await refreshStatus({announce:false});
     notice(result.warning
@@ -90,10 +101,11 @@ async function saveConfig(form){
     notice('App Store Connect API 已连接，但发布状态同步失败；请查看状态。');
    }
   }else{
-   notice('配置已保存，但连接验证未通过；请查看状态。');
+   $('#asc-dialog-status').textContent='配置已保存，但连接验证未通过；请检查 Key、Issuer ID 和私钥路径。';
   }
  }catch(error){
-  $('#asc-status').textContent=error.message;
+  form.querySelector('.form-error').textContent=error.message;
+  $('#asc-dialog-status').textContent='';
  }finally{
   button.disabled=false;
  }
@@ -114,11 +126,18 @@ async function checkConnection(){
 }
 
 function clearConfigUI(){
+ currentStatus=null;
  $('#asc-status').textContent='';
- $('#asc-form')?.reset();
+ populateConfigForm(null);
+ if($('#asc-dialog')?.open)$('#asc-dialog').close();
 }
 
 export function initAppStoreConnect(){
+ $('#asc-configure').onclick=()=>{
+  populateConfigForm();
+  $('#asc-dialog').showModal();
+ };
+
  $('#asc-form').onsubmit=event=>{
   event.preventDefault();
   saveConfig(event.target);
@@ -130,7 +149,7 @@ export function initAppStoreConnect(){
    const result=await api('/api/local/select-app-store-connect-key',{method:'POST'});
    if(!result.cancelled)$('#asc-form').elements.private_key_path.value=result.path;
   }catch(error){
-   $('#asc-status').textContent=error.message;
+   $('#asc-dialog-status').textContent=error.message;
   }finally{
    button.disabled=false;
   }
@@ -141,11 +160,12 @@ export function initAppStoreConnect(){
   if(!confirm('移除 ILS 的 App Store Connect API 配置？不会删除磁盘上的 .p8 私钥。'))return;
   try{
    const status=await api('/api/app-store-connect/config',{method:'DELETE'});
-   $('#asc-form').reset();
    renderStatus(status);
+   populateConfigForm(status);
+   $('#asc-dialog').close();
    notice('App Store Connect API 配置已从 ILS 移除。');
   }catch(error){
-   $('#asc-status').textContent=error.message;
+   $('#asc-dialog-status').textContent=error.message;
   }
  };
 

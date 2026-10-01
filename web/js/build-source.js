@@ -48,40 +48,56 @@ function renderCompatibilityScripts(){
  '</div>';
 }
 
+function populateSourceForm(source=null){
+ const form=$('#source-form');
+ form.reset();
+ form.elements.branch.value=source?.branch||'main';
+ form.elements.path.value=source?.path||'';
+ form.querySelector('.form-error').textContent='';
+ $('#source-dialog-status').textContent='';
+}
+
+function renderSourceSummary(source){
+ const button=$('#configure-source');
+ if(!source||source.configured===false){
+  button.textContent='配置项目来源';
+  $('#source-info').innerHTML='<div class="persistent-config-empty"><strong>尚未关联本地 Git 项目</strong><span>配置一次项目目录和发布分支后，ILS 会在构建前检查并执行 fast-forward pull。</span></div>';
+  return;
+ }
+ button.textContent='修改项目来源';
+ const ready=!source.blocker;
+ $('#source-info').innerHTML='<div class="persistent-config-grid">'+
+  '<span><small>项目目录</small><strong>'+escapeHTML(source.path||'—')+'</strong></span>'+
+  '<span><small>发布分支</small><strong>'+escapeHTML(source.branch||'—')+'</strong></span>'+
+  '<span><small>当前分支 / upstream</small><strong>'+escapeHTML((source.current_branch||'detached')+' → '+(source.upstream||'未配置'))+'</strong></span>'+
+  '<span><small>状态</small><strong class="'+(ready?'config-ok':'config-warning')+'">'+escapeHTML(source.blocker||'工作目录干净，可构建发布')+'</strong></span>'+
+ '</div>'+
+ (source.remote?'<div class="persistent-config-detail">'+escapeHTML(source.remote)+'</div>':'');
+}
+
 function resetSourceUI(){
  buildState.source=null;
- $('#source-form').reset();
- $('#source-form [name=branch]').value='main';
- $('#source-info').textContent='关联 Git 项目后，可以配置 ILS Release Profile。';
+ populateSourceForm();
+ renderSourceSummary(null);
  $('#build-scripts').innerHTML='';
 }
 
 export async function loadBuildSource(){
  if(!state.project||!state.admin)return;
  const project=state.project;
- $('#source-info').textContent='正在读取 Git 项目状态…';
+ $('#source-info').innerHTML='<div class="persistent-config-empty">正在读取 Git 项目状态…</div>';
  try{
   const source=await api('/api/projects/'+project+'/build-source');
   if(project!==state.project)return;
   buildState.source=source;
-  if(source.configured===false){
-   $('#source-info').textContent='尚未关联本地目录。先关联项目目录，再创建 ILS Release Profile。';
-   renderCompatibilityScripts();
-   window.dispatchEvent(new CustomEvent('build-source-loaded',{detail:{source}}));
-   return;
-  }
-  $('#source-form [name=path]').value=source.path;
-  $('#source-form [name=branch]').value=source.branch;
-  $('#source-info').textContent=
-   source.path+'\n分支 '+(source.current_branch||'detached')+' → '+(source.upstream||'未配置 upstream')+'\n'+
-   (source.remote||'')+'\n'+
-   (source.blocker||'工作目录干净，可由 ILS 拉取、构建并发布。');
+  populateSourceForm(source.configured===false?null:source);
+  renderSourceSummary(source);
   renderCompatibilityScripts();
   window.dispatchEvent(new CustomEvent('build-source-loaded',{detail:{source}}));
  }catch(error){
   if(project===state.project){
    buildState.source=null;
-   $('#source-info').textContent=error.message;
+   $('#source-info').innerHTML='<div class="persistent-config-empty config-error">'+escapeHTML(error.message)+'</div>';
    renderCompatibilityScripts();
   }
  }
@@ -90,6 +106,13 @@ export async function loadBuildSource(){
 export function initBuildSource(){
  $('#scan-builds').onclick=()=>{
   if(needAdmin())loadBuildSource();
+ };
+
+ $('#configure-source').onclick=()=>{
+  if(!needAdmin())return;
+  if(!state.project)return notice('请先选择项目');
+  populateSourceForm(buildState.source?.configured===false?null:buildState.source);
+  $('#source-dialog').showModal();
  };
 
  $('#source-form').onsubmit=async event=>{
@@ -103,10 +126,11 @@ export function initBuildSource(){
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify(Object.fromEntries(new FormData(event.target)))
    });
+   $('#source-dialog').close();
    await loadBuildSource();
-   notice('项目目录已关联，现在可以创建 ILS Release Profile。');
+   notice('项目来源已保存，现在可以创建或运行 ILS Release Profile。');
   }catch(error){
-   notice(error.message);
+   event.target.querySelector('.form-error').textContent=error.message;
   }finally{
    button.disabled=false;
   }
@@ -118,19 +142,19 @@ export function initBuildSource(){
   const project=state.project;
   button.disabled=true;
   button.textContent='等待 Mac 选择…';
-  $('#source-info').textContent='请在运行 ILS 的 Mac 上选择项目文件夹；首次使用可能需要允许控制 Finder。';
+  $('#source-dialog-status').textContent='请在运行 ILS 的 Mac 上选择项目文件夹；首次使用可能需要允许控制 Finder。';
   try{
    const result=await api('/api/local/select-folder',{method:'POST'});
    if(state.project!==project)return;
    if(result.cancelled){
-    $('#source-info').textContent='已取消选择，原路径未更改。';
+    $('#source-dialog-status').textContent='已取消选择，原路径未更改。';
     return;
    }
    $('#source-form [name=path]').value=result.path;
-   $('#source-info').textContent='已选择 Git 项目：'+result.path+'。点击“关联目录”后即可保存。';
+   $('#source-dialog-status').textContent='已选择：'+result.path;
    $('#source-form [type=submit]').focus();
   }catch(error){
-   if(state.project===project)$('#source-info').textContent=error.message;
+   if(state.project===project)$('#source-dialog-status').textContent=error.message;
   }finally{
    button.disabled=false;
    button.textContent='选择文件夹…';

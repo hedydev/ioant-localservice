@@ -112,6 +112,30 @@ This is UI state only. Every protected backend API must still enforce Bearer aut
 7. Validate JavaScript syntax, Go embed/build, and the relevant real workflow before calling the feature complete.
 
 
+## Persistent configuration UI
+
+Low-frequency persistent settings should not keep their full forms expanded in workspace pages.
+
+Use this pattern:
+
+```text
+workspace page
+→ compact current-state summary
+→ Configure / Edit button
+→ dialog containing the actual persistent form
+```
+
+Current examples:
+
+- project Git source path + release branch;
+- App Store Connect Key ID / Issuer ID / private-key path;
+- Release Profiles;
+- project creation.
+
+Operational actions that users may run repeatedly, such as **Refresh Release Status**, **Verify Connection**, build execution, log viewing, and update checks, remain directly available on the page when that improves the workflow.
+
+The summary and edit form must have separate rendering state so background status polling cannot overwrite fields while an administrator is editing a dialog.
+
 ## Responsive dialogs
 
 All dialogs share the base rules in `style.css`:

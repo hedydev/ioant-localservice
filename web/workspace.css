@@ -942,3 +942,87 @@
   display: none;
 }
 
+/* Persistent settings stay collapsed into status summaries. */
+.persistent-config-summary {
+  min-width: 0;
+}
+
+.persistent-config-empty {
+  padding: 14px 15px;
+  border: 1px dashed #ccd6df;
+  border-radius: 10px;
+  background: #fafbfc;
+  color: var(--muted);
+  font-size: .8125rem;
+}
+
+.persistent-config-empty strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #182736;
+  font-size: .875rem;
+}
+
+.persistent-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 8px;
+}
+
+.persistent-config-grid > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid #e6ebf0;
+  border-radius: 9px;
+  background: #f8fafb;
+}
+
+.persistent-config-grid small {
+  color: var(--muted);
+  font-size: .7rem;
+}
+
+.persistent-config-grid strong {
+  margin-top: 2px;
+  font-size: .78rem;
+  overflow-wrap: anywhere;
+}
+
+.persistent-config-detail {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}
+
+.persistent-config-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.config-ok {
+  color: #246e52;
+}
+
+.config-warning {
+  color: #8b5f1e;
+}
+
+.config-error {
+  color: #a13026;
+}
+
+@media (max-width: 720px) {
+  .persistent-config-grid {
+    grid-template-columns: minmax(0,1fr);
+  }
+
+  .persistent-config-actions button {
+    flex: 1 1 160px;
+  }
+}
+

@@ -181,6 +181,7 @@ platform
 - Build Job 日志布局进一步固定为“任务详情 → 查看/收起日志 → 此任务日志面板”；按钮和日志都位于对应任务卡内部，不允许出现列表底部的共享日志区域。
 - App Store Connect 同步新增 **Build Upload** 层：按 Bundle ID / marketing version / build number 查询 `buildUploads`，ILS 主状态徽标直接显示 `Build Upload Processing / Complete / Failed`；`COMPLETE` 后才继续解析 Build/Beta Detail。
 - TestFlight Release Profile 可配置目标 Group、Internal/External、自动创建 Group、以及显式的 External Beta Review 自动提交。Group 自动化只在正式 Build `processingState=VALID` 后执行；自动化错误独立记录，不会覆盖上传成功历史。
+- 持久低频配置统一采用“页面状态摘要 + 配置/编辑弹框”：当前已把项目来源（目录/发布分支）和 App Store Connect Key 配置从长期展开表单改为 dialog；页面保留刷新/验证等高频动作。状态轮询不得覆盖正在编辑的弹框字段。
 
 ## 2. 当前产品语义必须保持
 
