@@ -100,3 +100,17 @@ This is UI state only. Every protected backend API must still enforce Bearer aut
 5. Add the module to `web/app.js`.
 6. Ensure `web/embed.go` still covers the file pattern.
 7. Validate JavaScript syntax, Go embed/build, and the relevant real workflow before calling the feature complete.
+
+
+## Responsive dialogs
+
+All dialogs share the base rules in `style.css`:
+
+- dialog width is capped by the viewport;
+- long content scrolls vertically inside the form;
+- horizontal dialog scrolling is not allowed;
+- form grids use `minmax(0, 1fr)` tracks so selects and textareas cannot force overflow;
+- below 640 px, multi-column forms become one column;
+- the dialog heading remains visible while long forms scroll.
+
+Feature modules should not add ad-hoc dialog widths unless a genuinely different interaction requires it.

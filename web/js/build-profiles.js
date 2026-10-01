@@ -8,7 +8,12 @@ let appleSigningTeams=[];
 function teamLabel(team){
  const identity=team.identities?.[0]||'';
  const short=identity.replace(/\s*\([A-Z0-9]{10}\)\s*$/,'');
- return team.id+(short?' · '+short:'');
+ const purpose=team.identities?.some(value=>value.includes('Apple Distribution:'))
+  ?'发布 / TestFlight'
+  :team.identities?.some(value=>value.includes('Apple Development:'))
+   ?'开发签名'
+   :'签名 Team';
+ return purpose+' · '+team.id+(short?' · '+short:'');
 }
 
 async function loadAppleSigningTeams(selected=''){
