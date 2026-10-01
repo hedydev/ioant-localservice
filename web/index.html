@@ -1,20 +1,241 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>ILS · 构建与安装包分发</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23182736'/%3E%3Cpath d='M9 8v16h15v-5H14V8z' fill='%23b2f36b'/%3E%3C/svg%3E"><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/builds.js" defer></script></head>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>ILS · 构建与安装包分发</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23182736'/%3E%3Cpath d='M9 8v16h15v-5H14V8z' fill='%23b2f36b'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/workspace.css">
+<script type="module" src="/app.js"></script>
+</head>
 <body>
-<header><a class="brand" href="/">ILS<span>Ioant Local Service<small>局域网构建与分发</small></span></a><div class="header-actions"><span id="connection">正在连接</span><button id="admin-button" class="quiet">管理员验证</button><button id="logout-button" class="quiet" data-admin hidden>退出管理</button></div></header>
-<div class="layout"><aside><div class="section-label">项目空间 <button data-admin hidden id="new-project" class="icon-button" aria-label="新建项目">＋</button></div><nav id="projects" aria-label="项目"></nav><div class="aside-note">每一个构建，都有迹可循。<br>安装包保存在这台 Mac 上。</div></aside>
-<main><div class="page-heading"><div><div class="eyebrow">BUILD DISTRIBUTION</div><h1 id="project-title">安装包分发</h1><p id="project-subtitle">选择项目，查看最新构建与历史版本。</p></div><button data-admin hidden id="publish-button" class="primary">＋ 发布安装包</button></div>
-<div id="notice" role="status" hidden></div>
-<section data-admin hidden class="build-panel" aria-label="ILS 本地构建发布"><div class="section-heading"><div><h2>ILS 构建与发布</h2><span class="meta">配置保存在 ILS，不要求业务项目提供 release 脚本</span></div><button id="scan-builds">刷新配置</button></div><form id="source-form" class="inline-form"><div class="source-folder"><label for="project-folder">Mac 项目文件夹</label><div class="folder-input"><input id="project-folder" name="path" placeholder="选择文件夹，或输入项目绝对路径" required><button id="choose-project-folder" type="button">选择文件夹…</button></div></div><label>发布分支<input name="branch" value="main" required></label><button type="submit">关联目录</button></form><p id="source-info">关联 Git 项目后，可以直接在 ILS 创建 Release Profile。</p><div class="profile-toolbar"><div><strong>Release Profiles</strong><span class="meta"> ILS-owned</span></div><button id="new-release-profile" type="button">＋ 新建 Profile</button></div><div id="release-profiles"></div><div id="build-scripts"></div><div id="build-jobs"></div><pre id="build-log" hidden aria-label="构建日志"></pre></section>
-<section class="toolbar" aria-label="安装包筛选"><div class="segmented" id="platforms"><button data-platform="all" aria-pressed="true">全部平台</button><button data-platform="ios" aria-pressed="false">iOS</button><button data-platform="macos" aria-pressed="false">macOS</button></div><label>渠道 <select id="channel"><option value="all">全部渠道</option><option value="dev">开发版</option><option value="beta">测试版</option><option value="stable">正式版</option></select></label><label>安装包 <select id="variant"><option value="all">全部安装包</option></select></label><button id="refresh" class="quiet">刷新</button></section>
-<section id="latest" aria-label="最新安装包"></section>
-<section class="history"><div class="section-heading"><h2>版本历史 <span id="release-count">0</span></h2><span>按版本与构建号排序</span></div><div id="releases"></div></section>
-<section data-admin hidden class="utilities"><details><summary>检查当前版本是否有更新</summary><form id="check-form" class="inline-form"><label>平台<select name="platform"><option value="ios">iOS</option><option value="macos">macOS</option></select></label><label>架构<select name="architecture"><option value="arm64">Apple Silicon / iPhone</option><option value="x86_64">Intel Mac</option><option value="universal">通用 macOS</option></select></label><label>渠道<select name="channel"><option value="dev">开发版</option><option value="beta">测试版</option><option value="stable">正式版</option></select></label><label>安装包标识<input name="variant" value="default" required></label><label>当前版本<input name="current_version" placeholder="1.0.0" required></label><label>构建号<input name="current_build" type="number" min="1" placeholder="1" required></label><button type="submit">检查更新</button></form><p id="check-result" role="status"></p></details>
-<details id="signing-section"><summary>iOS 签名与安装</summary><div class="signing-guide"><p><strong>签名由 Mac 完成。</strong>iPhone 的开发者模式或“信任”操作不能替代开发证书和设备授权。</p><ol><li>在 Apple 开发者账号登记设备，并更新描述文件。</li><li>Mac 使用 Xcode、证书和项目归档导出签名 IPA。</li><li>开发签名通过 Xcode / Apple Configurator 安装；Ad Hoc 分发还需要受设备信任的 HTTPS。</li></ol><p>此页面不会要求输入 Apple ID 密码。签名凭据留在 Mac 的 Xcode 与钥匙串中。</p><div class="download-row"><a class="download secondary" href="/api/devices/enroll.mobileconfig">登记这台 iPhone / iPad</a><button id="devices-button" type="button">查看待登记设备</button></div><p>请在 Safari 打开。下载后到“设置 → 通用 → VPN 与设备管理”确认安装。描述文件可能显示“未签名”，它仅收集 UDID、型号和系统版本，不安装根证书或设备管理。登记成功不等于 Apple 已授权安装。</p><pre id="devices-list" hidden></pre><button id="sign-button">请求 Mac 签名</button><p id="sign-state" role="status"></p></div></details>
-<details><summary>自动发布接口</summary><p>打包完成后调用推送脚本即可。相同安装包重试不会重复创建版本。</p><pre id="api-example">选择项目后显示命令</pre><p>发布密钥由 Mac 本地保存。浏览和下载无需密钥，发布与签名需要密钥。</p></details></section>
-<footer>LOCAL STORAGE · iOS & macOS <span>每 20 秒自动检查新构建</span></footer></main></div>
-<dialog id="admin-dialog"><form id="admin-form"><div class="dialog-heading"><h2>发布管理</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div><p>输入这台 Mac 的发布密钥。密钥只保留在当前页面内存中，刷新后清除。</p><label>发布密钥<input id="token" type="password" autocomplete="off" required></label><p>在 Mac 项目目录查看 <code>.localservice/admin-token</code>。</p><p id="admin-error" class="form-error" role="alert"></p><button type="submit" class="primary">验证并进入管理</button></form></dialog>
-<dialog data-admin hidden id="project-dialog"><form id="project-form"><div class="dialog-heading"><h2>新建项目</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div><label>项目名称<input name="name" placeholder="我的应用" maxlength="120" required></label><label>项目标识<input name="id" placeholder="my-app" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label><p>用于自动上传接口；仅小写字母、数字、连字符。</p><p class="form-error" role="alert"></p><button type="submit" class="primary">创建项目</button></form></dialog>
-<dialog data-admin hidden id="profile-dialog"><form id="profile-form"><div class="dialog-heading"><h2 id="profile-dialog-title">新建 ILS Release Profile</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div><p>新项目优先使用 Apple Release Build Contract：项目脚本只负责构建/签名/提交，ILS 负责 Git、任务状态和本地安装包发布。</p><div class="form-grid"><label>Profile 名称<input name="name" placeholder="iOS Ad Hoc" maxlength="120" required></label><label>Profile ID<input name="id" placeholder="ios-adhoc" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label><label>平台<select name="platform"><option value="ios">iOS</option><option value="macos">macOS</option></select></label><label>架构<select name="architecture"><option value="arm64">arm64</option><option value="universal">universal</option><option value="x86_64">x86_64</option></select></label><label>发布 Lane<select name="lane"><option value="ios-adhoc">iOS · Ad Hoc / ILS</option><option value="ios-testflight">iOS · TestFlight</option><option value="macos-test">macOS · Test</option><option value="macos-release">macOS · Release / Notarized</option></select></label><label>结果契约<select name="result_contract"><option value="ils-result-v1">ILS Result v1（推荐）</option><option value="">Legacy artifact fields</option></select></label><label>渠道<select name="channel"><option value="dev">dev</option><option value="beta">beta</option><option value="stable">stable</option></select></label><label>安装包标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label></div><label>Build Command<textarea name="build_command" rows="4" placeholder="例如：bash scripts/ils-build-ios.sh --adhoc" required></textarea></label><label>Package Command <span class="meta">可选；标准脚本通常不需要</span><textarea name="package_command" rows="3" placeholder="仅在确实需要第二阶段命令时填写"></textarea></label><p id="profile-contract-help">标准模式：脚本写入 ILS_OUTPUT_DIR/ils-result.json，ILS 验证最终产物后负责发布。</p><label>Legacy Artifact Path <span class="meta">仅兼容模式</span><input name="artifact" placeholder="build/release/App.ipa 或 $ILS_OUTPUT_DIR/App.ipa"></label><div class="form-grid"><label>Legacy macOS Version Command<input name="version_command" placeholder="例如：./scripts/version.sh"></label><label>Legacy macOS Build Number Command<input name="build_number_command" placeholder="例如：./scripts/build-number.sh"></label></div><p class="meta">TestFlight lane 由项目脚本上传 App Store Connect；ILS 显示 archive / upload / submitted 状态和实时日志。上传成功不等于 Apple 已完成 Processing。</p><label>Release Notes<textarea name="notes" rows="3" maxlength="16000" placeholder="可选，保存为此 Profile 的默认发布说明"></textarea></label><p class="form-error" role="alert"></p><div class="dialog-actions"><button id="delete-profile" type="button" class="danger" hidden>删除</button><button type="submit" class="primary">保存 Profile</button></div></form></dialog>
-<dialog data-admin hidden id="publish-dialog"><form id="publish-form"><div class="dialog-heading"><h2>发布安装包</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div><div class="form-grid"><label>平台<select name="platform"><option value="ios">iOS</option><option value="macos">macOS</option></select></label><label>架构<select name="architecture"><option value="arm64">arm64</option><option value="universal">universal</option><option value="x86_64">x86_64</option></select></label><label>版本<input name="version" placeholder="1.0.0" required></label><label>构建号<input name="build" type="number" min="1" step="1" required></label><label>渠道<select name="channel"><option value="dev">开发版</option><option value="beta">测试版</option><option value="stable">正式版</option></select></label></div><label>安装包标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label><p>同平台多个安装包可分别使用 desktop、helper、dmg 等标识。</p><label>更新说明<textarea name="notes" rows="3" placeholder="这个版本有哪些变化？" maxlength="16000"></textarea></label><label class="file-zone">选择安装包<input name="file" type="file" accept=".ipa,.dmg,.pkg,.zip" required><small>IPA / DMG / PKG / ZIP · 最大 4 GB</small></label><p class="form-error" role="alert"></p><button type="submit" class="primary">上传并发布</button></form></dialog>
-</body></html>
+<header>
+  <a class="brand" href="/">ILS<span>Ioant Local Service<small>局域网构建与分发</small></span></a>
+  <div class="header-actions">
+    <span id="connection">正在连接</span>
+    <button id="admin-button" class="quiet">管理员验证</button>
+    <button id="logout-button" class="quiet" data-admin hidden>退出管理</button>
+  </div>
+</header>
+
+<div class="layout">
+<aside>
+  <div class="section-label">项目空间 <button data-admin hidden id="new-project" class="icon-button" aria-label="新建项目">＋</button></div>
+  <nav id="projects" aria-label="项目"></nav>
+  <div class="aside-note">每一个构建，都有迹可循。<br>安装包保存在这台 Mac 上。</div>
+</aside>
+
+<main>
+  <div class="page-heading">
+    <div>
+      <div class="eyebrow">BUILD DISTRIBUTION</div>
+      <h1 id="project-title">安装包分发</h1>
+      <p id="project-subtitle">选择项目，查看最新构建与历史版本。</p>
+    </div>
+  </div>
+
+  <div id="notice" role="status" hidden></div>
+
+  <nav id="workspace-tabs" class="workspace-tabs" aria-label="项目功能">
+    <button data-view="overview" aria-pressed="true">概览</button>
+    <button data-view="builds" data-admin hidden aria-pressed="false">构建与发布</button>
+    <button data-view="releases" aria-pressed="false">版本历史</button>
+    <button data-view="ios" data-admin hidden aria-pressed="false">iOS / TestFlight</button>
+    <button data-view="automation" data-admin hidden aria-pressed="false">自动化 / API</button>
+  </nav>
+
+  <section id="view-overview" class="workspace-view" data-view-panel="overview">
+    <div class="view-heading">
+      <div><h2>项目概览</h2><p>当前项目最新安装包与发布状态。</p></div>
+    </div>
+    <div id="overview-stats" class="overview-stats"></div>
+    <div id="overview-latest"></div>
+  </section>
+
+  <section id="view-builds" class="workspace-view" data-view-panel="builds" data-admin-view hidden>
+    <div class="view-heading">
+      <div><h2>构建与发布</h2><p>项目来源、Release Profiles、构建任务和实时日志。</p></div>
+      <button id="scan-builds">刷新配置</button>
+    </div>
+
+    <article class="panel-card">
+      <div class="section-heading"><div><h2>项目来源</h2><span class="meta">Git source</span></div></div>
+      <form id="source-form" class="inline-form">
+        <div class="source-folder">
+          <label for="project-folder">Mac 项目文件夹</label>
+          <div class="folder-input">
+            <input id="project-folder" name="path" placeholder="选择文件夹，或输入项目绝对路径" required>
+            <button id="choose-project-folder" type="button">选择文件夹…</button>
+          </div>
+        </div>
+        <label>发布分支<input name="branch" value="main" required></label>
+        <button type="submit">关联目录</button>
+      </form>
+      <p id="source-info">关联 Git 项目后，可以配置 ILS Release Profile。</p>
+      <div id="build-scripts"></div>
+    </article>
+
+    <article class="panel-card">
+      <div class="section-heading">
+        <div><h2>Release Profiles</h2><span class="meta">ILS-owned</span></div>
+        <button id="new-release-profile" type="button">＋ 新建 Profile</button>
+      </div>
+      <div id="release-profiles"></div>
+    </article>
+
+    <article class="panel-card">
+      <div class="section-heading"><div><h2>构建任务</h2><span class="meta">状态、结果与日志</span></div></div>
+      <div id="build-jobs"></div>
+      <pre id="build-log" hidden aria-label="构建日志"></pre>
+    </article>
+  </section>
+
+  <section id="view-releases" class="workspace-view" data-view-panel="releases" hidden>
+    <div class="view-heading">
+      <div><h2>版本历史</h2><p>浏览、筛选、下载和手动发布安装包。</p></div>
+      <button data-admin hidden id="publish-button" class="primary">＋ 手动发布安装包</button>
+    </div>
+
+    <div class="toolbar" aria-label="安装包筛选">
+      <div class="segmented" id="platforms">
+        <button data-platform="all" aria-pressed="true">全部平台</button>
+        <button data-platform="ios" aria-pressed="false">iOS</button>
+        <button data-platform="macos" aria-pressed="false">macOS</button>
+      </div>
+      <label>渠道 <select id="channel"><option value="all">全部渠道</option><option value="dev">开发版</option><option value="beta">测试版</option><option value="stable">正式版</option></select></label>
+      <label>安装包 <select id="variant"><option value="all">全部安装包</option></select></label>
+      <button id="refresh" class="quiet">刷新</button>
+    </div>
+
+    <div class="section-heading"><h2>历史版本 <span id="release-count">0</span></h2><span>按版本与构建号排序</span></div>
+    <div id="releases"></div>
+
+    <article class="panel-card compact" data-admin hidden>
+      <div class="section-heading"><div><h2>版本检查</h2><span class="meta">模拟客户端更新查询</span></div></div>
+      <form id="check-form" class="inline-form">
+        <label>平台<select name="platform"><option value="ios">iOS</option><option value="macos">macOS</option></select></label>
+        <label>架构<select name="architecture"><option value="arm64">Apple Silicon / iPhone</option><option value="x86_64">Intel Mac</option><option value="universal">通用 macOS</option></select></label>
+        <label>渠道<select name="channel"><option value="dev">开发版</option><option value="beta">测试版</option><option value="stable">正式版</option></select></label>
+        <label>安装包标识<input name="variant" value="default" required></label>
+        <label>当前版本<input name="current_version" placeholder="1.0.0" required></label>
+        <label>构建号<input name="current_build" type="number" min="1" placeholder="1" required></label>
+        <button type="submit">检查更新</button>
+      </form>
+      <p id="check-result" role="status"></p>
+    </article>
+  </section>
+
+  <section id="view-ios" class="workspace-view" data-view-panel="ios" data-admin-view hidden>
+    <div class="view-heading">
+      <div><h2>iOS / TestFlight</h2><p>设备登记、签名安装与 TestFlight 发布入口。</p></div>
+      <button type="button" data-go-view="builds">查看 iOS Release Profiles</button>
+    </div>
+
+    <article class="panel-card">
+      <div class="section-heading"><div><h2>设备登记与 Ad Hoc 安装</h2><span class="meta">Device enrollment</span></div></div>
+      <div class="signing-guide">
+        <p><strong>签名由 Mac 完成。</strong>iPhone 的开发者模式或“信任”操作不能替代开发证书和设备授权。</p>
+        <ol>
+          <li>在 Apple 开发者账号登记设备，并更新描述文件。</li>
+          <li>Mac 使用 Xcode、证书和项目归档导出签名 IPA。</li>
+          <li>Ad Hoc 分发需要目标设备存在于 provisioning profile。</li>
+        </ol>
+        <div class="download-row">
+          <a class="download secondary" href="/api/devices/enroll.mobileconfig">登记这台 iPhone / iPad</a>
+          <button id="devices-button" type="button">查看待登记设备</button>
+        </div>
+        <pre id="devices-list" hidden></pre>
+      </div>
+    </article>
+
+    <article class="panel-card">
+      <div class="section-heading"><div><h2>Mac 签名服务</h2><span class="meta">兼容预配置 archive 流程</span></div></div>
+      <p>使用 ILS 已配置的 Xcode archive 进行签名与发布。新的项目发布优先使用 Release Profile。</p>
+      <button id="sign-button">请求 Mac 签名</button>
+      <p id="sign-state" role="status"></p>
+    </article>
+
+    <article class="panel-card">
+      <div class="section-heading"><div><h2>TestFlight</h2><span class="meta">App Store Connect</span></div></div>
+      <p>TestFlight 通过 <code>ios-testflight</code> Release Profile 执行。上传成功与 Apple Processing / tester availability 分开记录。</p>
+      <button type="button" data-go-view="builds">前往构建与发布</button>
+    </article>
+  </section>
+
+  <section id="view-automation" class="workspace-view" data-view-panel="automation" data-admin-view hidden>
+    <div class="view-heading"><div><h2>自动化 / API</h2><p>脚本发布、服务接口和机器集成。</p></div></div>
+    <article class="panel-card">
+      <div class="section-heading"><div><h2>自动发布接口</h2><span class="meta">Legacy / external automation</span></div></div>
+      <p>标准 Release Profile 由 ILS 自己负责最终发布。外部脚本仍可使用 <code>scripts/push.sh</code> 兼容接口。</p>
+      <pre id="api-example">选择项目后显示命令</pre>
+      <p>发布密钥由 Mac 本地保存；不要写入仓库或日志。</p>
+    </article>
+  </section>
+
+  <footer>LOCAL STORAGE · iOS & macOS <span>页面数据会自动刷新</span></footer>
+</main>
+</div>
+
+<dialog id="admin-dialog"><form id="admin-form">
+  <div class="dialog-heading"><h2>发布管理</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div>
+  <p>输入这台 Mac 的发布密钥。密钥只保留在当前页面内存中，刷新后清除。</p>
+  <label>发布密钥<input id="token" type="password" autocomplete="off" required></label>
+  <p>在 Mac 项目目录查看 <code>.localservice/admin-token</code>。</p>
+  <p id="admin-error" class="form-error" role="alert"></p>
+  <button type="submit" class="primary">验证并进入管理</button>
+</form></dialog>
+
+<dialog data-admin hidden id="project-dialog"><form id="project-form">
+  <div class="dialog-heading"><h2>新建项目</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div>
+  <label>项目名称<input name="name" placeholder="我的应用" maxlength="120" required></label>
+  <label>项目标识<input name="id" placeholder="my-app" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>
+  <p>用于自动上传接口；仅小写字母、数字、连字符。</p>
+  <p class="form-error" role="alert"></p>
+  <button type="submit" class="primary">创建项目</button>
+</form></dialog>
+
+<dialog data-admin hidden id="profile-dialog"><form id="profile-form">
+  <div class="dialog-heading"><h2 id="profile-dialog-title">新建 ILS Release Profile</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div>
+  <p>配置只保存在 ILS 本机数据目录；业务仓库只提供标准构建入口。</p>
+  <div class="form-grid">
+    <label>Profile 名称<input name="name" placeholder="iOS Ad Hoc" maxlength="120" required></label>
+    <label>Profile ID<input name="id" placeholder="ios-adhoc" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>
+    <label>平台<select name="platform"><option value="ios">iOS</option><option value="macos">macOS</option></select></label>
+    <label>架构<select name="architecture"><option value="arm64">arm64</option><option value="universal">universal</option><option value="x86_64">x86_64</option></select></label>
+    <label>发布 Lane<select name="lane"><option value="ios-adhoc">iOS · Ad Hoc / ILS</option><option value="ios-testflight">iOS · TestFlight</option><option value="macos-test">macOS · Test</option><option value="macos-release">macOS · Release / Notarized</option></select></label>
+    <label>结果契约<select name="result_contract"><option value="ils-result-v1">ILS Result v1（推荐）</option><option value="">Legacy artifact fields</option></select></label>
+    <label>渠道<select name="channel"><option value="dev">dev</option><option value="beta">beta</option><option value="stable">stable</option></select></label>
+    <label>安装包标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>
+  </div>
+  <label>Build Command<textarea name="build_command" rows="4" placeholder="例如：bash scripts/ils-build-ios.sh --adhoc" required></textarea></label>
+  <label>Package Command <span class="meta">可选；标准脚本通常不需要</span><textarea name="package_command" rows="3"></textarea></label>
+  <p id="profile-contract-help">标准模式：脚本写入 ILS_OUTPUT_DIR/ils-result.json，ILS 验证最终产物后负责发布。</p>
+  <label>Legacy Artifact Path <span class="meta">仅兼容模式</span><input name="artifact" placeholder="build/release/App.ipa 或 $ILS_OUTPUT_DIR/App.ipa"></label>
+  <div class="form-grid">
+    <label>Legacy macOS Version Command<input name="version_command"></label>
+    <label>Legacy macOS Build Number Command<input name="build_number_command"></label>
+  </div>
+  <label>Release Notes<textarea name="notes" rows="3" maxlength="16000"></textarea></label>
+  <p class="form-error" role="alert"></p>
+  <div class="dialog-actions"><button id="delete-profile" type="button" class="danger" hidden>删除</button><button type="submit" class="primary">保存 Profile</button></div>
+</form></dialog>
+
+<dialog data-admin hidden id="publish-dialog"><form id="publish-form">
+  <div class="dialog-heading"><h2>手动发布安装包</h2><button type="button" data-close class="icon-button" aria-label="关闭">×</button></div>
+  <div class="form-grid">
+    <label>平台<select name="platform"><option value="ios">iOS</option><option value="macos">macOS</option></select></label>
+    <label>架构<select name="architecture"><option value="arm64">arm64</option><option value="universal">universal</option><option value="x86_64">x86_64</option></select></label>
+    <label>版本<input name="version" placeholder="1.0.0" required></label>
+    <label>构建号<input name="build" type="number" min="1" step="1" required></label>
+    <label>渠道<select name="channel"><option value="dev">开发版</option><option value="beta">测试版</option><option value="stable">正式版</option></select></label>
+  </div>
+  <label>安装包标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>
+  <label>更新说明<textarea name="notes" rows="3" maxlength="16000"></textarea></label>
+  <label class="file-zone">选择安装包<input name="file" type="file" accept=".ipa,.dmg,.pkg,.zip" required><small>IPA / DMG / PKG / ZIP · 最大 4 GB</small></label>
+  <p class="form-error" role="alert"></p>
+  <button type="submit" class="primary">上传并发布</button>
+</form></dialog>
+</body>
+</html>

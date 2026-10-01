@@ -15,6 +15,8 @@ On first launch, ILS creates `.localservice/admin-token` with file mode `0600`. 
 
 The default data directory is `.localservice/`. Use `-data /absolute/path` to change it. Packages are stored under `artifacts/`, while metadata is written atomically to `state.json`. Back up the entire data directory. **Only one ILS process may use a given data directory at a time.** Multi-instance and clustered operation are not currently supported. Historical releases are not deleted automatically.
 
+The web UI is organized as project workspace tabs (Overview, Build & Release, Release History, iOS / TestFlight, Automation / API) backed by focused ES modules instead of one growing script. See [WEB_UI_ARCHITECTURE.md](docs/WEB_UI_ARCHITECTURE.md) before adding UI behavior.
+
 ## Build and publish from local project directories
 
 ILS can link a project to its existing Git working directory on the Mac. The project remains in its original location; ILS stores orchestration configuration in its own data directory and executes release commands with the project directory as the working directory.
