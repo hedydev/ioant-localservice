@@ -210,6 +210,7 @@
     <label>平台<select name="platform"><option value="ios">iOS</option><option value="macos">macOS</option></select></label>
     <label>架构<select name="architecture"><option value="arm64">arm64</option><option value="universal">universal</option><option value="x86_64">x86_64</option></select></label>
     <label>发布 Lane<select name="lane"><option value="ios-adhoc">iOS · Ad Hoc / ILS</option><option value="ios-testflight">iOS · TestFlight</option><option value="macos-test">macOS · Test</option><option value="macos-release">macOS · Release / Notarized</option></select></label>
+    <label>Apple Team<select id="profile-apple-team" name="apple_team_id"><option value="">自动检测（仅一个 Team 时）</option></select><span id="profile-apple-team-help" class="meta">打开 Profile 时由 ILS 读取这台 Mac 的签名身份。</span></label>
     <label>结果契约<select name="result_contract"><option value="ils-result-v1">ILS Result v1（推荐）</option><option value="">Legacy artifact fields</option></select></label>
     <label>渠道<select name="channel"><option value="dev">dev</option><option value="beta">beta</option><option value="stable">stable</option></select></label>
     <label>安装包标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>

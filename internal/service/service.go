@@ -200,6 +200,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/devices", a.listDevices)
 	mux.HandleFunc("GET /api/projects/{project}/build-source", a.buildSource)
 	mux.HandleFunc("POST /api/local/select-folder", a.selectFolder)
+	mux.HandleFunc("GET /api/local/apple-signing-teams", a.appleSigningTeams)
 	mux.HandleFunc("POST /api/projects/{project}/build-source", a.buildSource)
 	mux.HandleFunc("GET /api/projects/{project}/release-profiles", a.releaseProfiles)
 	mux.HandleFunc("POST /api/projects/{project}/release-profiles", a.releaseProfiles)

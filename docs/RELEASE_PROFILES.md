@@ -62,6 +62,7 @@ ILS then runs `git pull --ff-only` with Git hooks and autostash disabled. It doe
 | `variant` | Stable package identity |
 | `lane` | `ios-adhoc`, `ios-testflight`, `macos-test`, or `macos-release` |
 | `result_contract` | Preferred: `ils-result-v1`; empty keeps legacy artifact-field behavior |
+| `apple_team_id` | Optional 10-character Apple Team ID. ILS exposes detected local signing teams in the Profile UI and exports the selected value as `ILS_APPLE_TEAM_ID`. Required by the UI when multiple signing teams are detected for an iOS profile. |
 | `build_command` | Shell command executed from the linked project directory |
 | `package_command` | Optional second command |
 | `artifact` | Legacy mode only: relative artifact path/glob or path under `$ILS_OUTPUT_DIR` |
@@ -88,6 +89,7 @@ ILS_CHANNEL
 ILS_ARCHITECTURE
 ILS_VARIANT
 ILS_LANE
+ILS_APPLE_TEAM_ID   # only when selected in the Release Profile
 ```
 
 The standard project script must place final release evidence beneath `ILS_OUTPUT_DIR`. Large compiler/package caches may remain in the project's configured development cache.
@@ -192,6 +194,7 @@ iOS TestFlight:
   "variant": "default",
   "lane": "ios-testflight",
   "result_contract": "ils-result-v1",
+  "apple_team_id": "YOURTEAMID",
   "build_command": "bash scripts/ils-build-ios.sh --testflight"
 }
 ```

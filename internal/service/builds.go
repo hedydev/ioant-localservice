@@ -39,6 +39,7 @@ type ReleaseProfile struct {
 	Variant            string `json:"variant"`
 	Lane               string `json:"lane,omitempty"`
 	ResultContract     string `json:"result_contract,omitempty"`
+	AppleTeamID        string `json:"apple_team_id,omitempty"`
 	BuildCommand       string `json:"build_command"`
 	PackageCommand     string `json:"package_command,omitempty"`
 	Artifact           string `json:"artifact,omitempty"`
@@ -252,6 +253,7 @@ func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
 	p.Variant = strings.TrimSpace(p.Variant)
 	p.Lane = strings.TrimSpace(p.Lane)
 	p.ResultContract = strings.TrimSpace(p.ResultContract)
+	p.AppleTeamID = strings.ToUpper(strings.TrimSpace(p.AppleTeamID))
 	p.BuildCommand = strings.TrimSpace(p.BuildCommand)
 	p.PackageCommand = strings.TrimSpace(p.PackageCommand)
 	p.Artifact = strings.TrimSpace(p.Artifact)
@@ -280,6 +282,9 @@ func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
 	}
 	if p.ResultContract != "" && p.ResultContract != "ils-result-v1" {
 		return p, fmt.Errorf("result_contract 仅支持 ils-result-v1")
+	}
+	if p.AppleTeamID != "" && !appleTeamIDRE.MatchString(p.AppleTeamID) {
+		return p, fmt.Errorf("Apple Team ID 必须是 10 位大写字母或数字")
 	}
 	if p.Lane == "ios-testflight" && p.ResultContract != "ils-result-v1" {
 		return p, fmt.Errorf("TestFlight Profile 必须使用 ils-result-v1")
@@ -879,6 +884,9 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 			"ILS_ARCHITECTURE="+profile.Architecture,
 			"ILS_VARIANT="+profile.Variant,
 			"ILS_LANE="+profile.Lane)
+		if profile.AppleTeamID!="" {
+			env=append(env,"ILS_APPLE_TEAM_ID="+profile.AppleTeamID)
+		}
 	}
 	if profile==nil {
 		j.Stage="script"; _=a.writeBuild(j)

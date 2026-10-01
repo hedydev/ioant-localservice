@@ -3,6 +3,50 @@ import {$,state,api,escapeHTML,notice,needAdmin} from './core.js';
 import {buildState} from './build-state.js';
 import {startBuild} from './build-actions.js';
 
+let appleSigningTeams=[];
+
+function teamLabel(team){
+ const identity=team.identities?.[0]||'';
+ const short=identity.replace(/\s*\([A-Z0-9]{10}\)\s*$/,'');
+ return team.id+(short?' · '+short:'');
+}
+
+async function loadAppleSigningTeams(selected=''){
+ const form=$('#profile-form');
+ const select=form.elements.apple_team_id;
+ const help=$('#profile-apple-team-help');
+ const save=form.querySelector('[type=submit]');
+ select.disabled=true;
+ save.disabled=true;
+ help.textContent='正在读取这台 Mac 的 Apple 签名身份…';
+ try{
+  appleSigningTeams=await api('/api/local/apple-signing-teams');
+  select.innerHTML='<option value="">自动检测（仅一个 Team 时）</option>'+
+   appleSigningTeams.map(team=>'<option value="'+escapeHTML(team.id)+'">'+escapeHTML(teamLabel(team))+'</option>').join('');
+  if(selected&&!appleSigningTeams.some(team=>team.id===selected)){
+   select.insertAdjacentHTML('beforeend','<option value="'+escapeHTML(selected)+'">'+escapeHTML(selected)+' · 当前签名身份未检测到</option>');
+  }
+  if(selected)select.value=selected;
+  else if(appleSigningTeams.length===1)select.value=appleSigningTeams[0].id;
+
+  if(appleSigningTeams.length===0)help.textContent='未检测到有效代码签名身份；运行构建时会在预检查阶段给出错误。';
+  else if(appleSigningTeams.length===1)help.textContent='已检测到唯一 Apple Team，并自动选择。';
+  else help.textContent='检测到 '+appleSigningTeams.length+' 个 Apple Team；iOS 发布必须明确选择一个。';
+ }catch(error){
+  appleSigningTeams=[];
+  select.innerHTML='<option value="">自动检测（仅一个 Team 时）</option>';
+  if(selected){
+   select.insertAdjacentHTML('beforeend','<option value="'+escapeHTML(selected)+'">'+escapeHTML(selected)+'</option>');
+   select.value=selected;
+  }
+  help.textContent='无法读取签名 Team：'+error.message;
+ }finally{
+  select.disabled=false;
+  save.disabled=false;
+  syncProfileForm();
+ }
+}
+
 function profileSummary(profile){
  const standard=profile.result_contract==='ils-result-v1';
  const lane=profile.lane||(profile.platform==='ios'?'ios-adhoc':'macos-test');
@@ -12,7 +56,8 @@ function profileSummary(profile){
  const output=standard
   ?(lane==='ios-testflight'?'App Store Connect / TestFlight submission':'由 ILS_OUTPUT_DIR/ils-result.json 返回最终产物')
   :'产物：'+profile.artifact;
- return (profile.platform==='ios'?'iOS':'macOS')+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+'<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output);
+ const team=profile.apple_team_id?'<br>Apple Team · '+escapeHTML(profile.apple_team_id):'';
+ return (profile.platform==='ios'?'iOS':'macOS')+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+'<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team;
 }
 
 function renderProfiles(){
@@ -25,18 +70,21 @@ function renderProfiles(){
   return;
  }
 
- $('#release-profiles').innerHTML=buildState.profiles.map(profile=>
-  '<article class="release">'+
+ $('#release-profiles').innerHTML=buildState.profiles.map(profile=>{
+  const teamRequired=profile.platform==='ios'&&appleSigningTeams.length>1&&!profile.apple_team_id;
+  const runBlocked=blocked||teamRequired;
+  return '<article class="release">'+
    '<div class="release-top">'+
     '<div><strong>'+escapeHTML(profile.name)+'</strong><div class="meta">ILS / '+escapeHTML(profile.id)+'</div></div>'+
-    '<div class="profile-actions"><button data-edit-profile="'+escapeHTML(profile.id)+'">编辑</button><button data-run-profile="'+escapeHTML(profile.id)+'" '+(blocked?'disabled':'')+'>构建并发布</button></div>'+
+    '<div class="profile-actions"><button data-edit-profile="'+escapeHTML(profile.id)+'">编辑</button><button data-run-profile="'+escapeHTML(profile.id)+'" '+(runBlocked?'disabled':'')+'>构建并发布</button></div>'+
    '</div>'+
    '<p class="meta">'+profileSummary(profile)+'</p>'+
+   (teamRequired?'<div class="job-message">检测到多个 Apple Signing Team；请先编辑 Profile 并选择 Apple Team。</div>':'')+
    '<details><summary>查看命令</summary><p><strong>Build</strong></p><pre>'+escapeHTML(profile.build_command)+'</pre>'+
     (profile.package_command?'<p><strong>Package</strong></p><pre>'+escapeHTML(profile.package_command)+'</pre>':'')+
    '</details>'+
-  '</article>'
- ).join('');
+  '</article>';
+ }).join('');
 }
 
 export async function loadReleaseProfiles(){
@@ -47,9 +95,13 @@ export async function loadReleaseProfiles(){
  }
  const project=state.project;
  try{
-  const profiles=await api('/api/projects/'+project+'/release-profiles');
+  const [profiles,teams]=await Promise.all([
+   api('/api/projects/'+project+'/release-profiles'),
+   api('/api/local/apple-signing-teams').catch(()=>null)
+  ]);
   if(project!==state.project)return;
   buildState.profiles=profiles;
+  if(Array.isArray(teams))appleSigningTeams=teams;
   renderProfiles();
  }catch(error){
   if(project===state.project)notice(error.message);
@@ -64,6 +116,8 @@ function syncProfileForm(){
  [...lane.options].forEach(option=>option.hidden=!option.value.startsWith(platform+'-'));
  if(!lane.value.startsWith(platform+'-'))lane.value=platform==='ios'?'ios-adhoc':'macos-test';
  const legacy=contract!=='ils-result-v1';
+ const multipleTeams=appleSigningTeams.length>1;
+ form.elements.apple_team_id.required=platform==='ios'&&multipleTeams;
  form.elements.artifact.required=legacy;
  form.elements.version_command.required=legacy&&platform==='macos';
  form.elements.build_number_command.required=legacy&&platform==='macos';
@@ -89,16 +143,19 @@ function openProfile(profile=null){
  form.elements.variant.value='default';
  form.elements.lane.value='ios-adhoc';
  form.elements.result_contract.value='ils-result-v1';
+ const selectedTeam=profile?.apple_team_id||'';
  if(profile){
   for(const [key,value] of Object.entries(profile)){
-   if(form.elements[key])form.elements[key].value=value??'';
+   if(key!=='apple_team_id'&&form.elements[key])form.elements[key].value=value??'';
   }
  }
+ form.elements.apple_team_id.innerHTML='<option value="">正在读取 Apple Team…</option>';
  syncProfileForm();
  $('#delete-profile').hidden=!profile;
  $('#profile-dialog-title').textContent=profile?'编辑 ILS Release Profile':'新建 ILS Release Profile';
  form.querySelector('.form-error').textContent='';
  $('#profile-dialog').showModal();
+ loadAppleSigningTeams(selectedTeam);
 }
 
 function resetProfiles(){
