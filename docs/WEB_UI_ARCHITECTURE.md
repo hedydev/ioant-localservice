@@ -9,7 +9,7 @@ The ILS web UI is a small framework-free ES-module application. The browser entr
 | Overview | Latest release and project release counts | Public |
 | Build & Release | Git source, Release Profiles, build jobs and live logs | Admin |
 | Release History | Filters, downloads, history and manual upload | Public browsing; upload is Admin |
-| iOS / TestFlight | Device enrollment, signing compatibility flow and TestFlight guidance | Admin |
+| iOS Install | Public device enrollment and installable iOS releases; admin-only device UDIDs, signing controls and TestFlight guidance live in the same view | Public + Admin enhancements |
 | Automation / API | External `push.sh` and API integration guidance | Admin |
 
 The selected view is stored in the URL hash, for example `#builds` or `#releases`. Admin-only hashes fall back to Overview when the browser has not verified an administrator session.
@@ -47,7 +47,7 @@ Keep these boundaries when adding features:
 - Git source configuration must not be added to release-history code.
 - Release Profile forms and CRUD belong in `build-profiles.js`.
 - Task state, progress and build logs belong in `build-jobs.js`.
-- Device/signing controls belong in `ios.js`.
+- Public iOS enrollment/install presentation and admin-only device/signing/TestFlight controls belong in `ios.js`.
 - External integration examples belong in `automation.js`.
 - Navigation code must not perform build, release or signing API actions.
 

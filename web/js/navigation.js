@@ -2,8 +2,8 @@
 import {$,state} from './core.js';
 
 const validViews=new Set(['overview','builds','releases','ios','automation']);
-const adminViews=new Set(['builds','ios','automation']);
-const labels={overview:'项目概览',builds:'构建与发布',releases:'版本历史',ios:'iOS / TestFlight',automation:'自动化 / API'};
+const adminViews=new Set(['builds','automation']);
+const labels={overview:'项目概览',builds:'构建与发布',releases:'版本历史',ios:'iOS 安装',automation:'自动化 / API'};
 
 function requestedView(){
  const value=location.hash.replace(/^#/,'');

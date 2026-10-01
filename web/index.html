@@ -42,7 +42,7 @@
     <button data-view="overview" aria-pressed="true">概览</button>
     <button data-view="builds" data-admin hidden aria-pressed="false">构建与发布</button>
     <button data-view="releases" aria-pressed="false">版本历史</button>
-    <button data-view="ios" data-admin hidden aria-pressed="false">iOS / TestFlight</button>
+    <button data-view="ios" aria-pressed="false">iOS 安装</button>
     <button data-view="automation" data-admin hidden aria-pressed="false">自动化 / API</button>
   </nav>
 
@@ -127,39 +127,44 @@
     </article>
   </section>
 
-  <section id="view-ios" class="workspace-view" data-view-panel="ios" data-admin-view hidden>
+  <section id="view-ios" class="workspace-view" data-view-panel="ios" hidden>
     <div class="view-heading">
-      <div><h2>iOS / TestFlight</h2><p>设备登记、签名安装与 TestFlight 发布入口。</p></div>
-      <button type="button" data-go-view="builds">查看 iOS Release Profiles</button>
+      <div><h2>iOS 安装</h2><p>新设备可以先登记，再安装管理员为该设备发布的 Ad Hoc 版本。</p></div>
+      <button type="button" data-go-view="builds" data-admin hidden>查看 iOS Release Profiles</button>
     </div>
 
     <article class="panel-card">
-      <div class="section-heading"><div><h2>设备登记与 Ad Hoc 安装</h2><span class="meta">Device enrollment</span></div></div>
-      <div class="signing-guide">
-        <p><strong>签名由 Mac 完成。</strong>iPhone 的开发者模式或“信任”操作不能替代开发证书和设备授权。</p>
-        <ol>
-          <li>在 Apple 开发者账号登记设备，并更新描述文件。</li>
-          <li>Mac 使用 Xcode、证书和项目归档导出签名 IPA。</li>
-          <li>Ad Hoc 分发需要目标设备存在于 provisioning profile。</li>
-        </ol>
-        <div class="download-row">
-          <a class="download secondary" href="/api/devices/enroll.mobileconfig">登记这台 iPhone / iPad</a>
-          <button id="devices-button" type="button">查看待登记设备</button>
-        </div>
-        <pre id="devices-list" hidden></pre>
+      <div class="section-heading"><div><h2>登记这台设备</h2><span class="meta">无需管理员密钥</span></div></div>
+      <p>第一次使用的新 iPhone / iPad，需要先把设备信息提交给管理员。登记只收集 UDID、设备型号和 iOS 版本，不安装根证书或 MDM。</p>
+      <div class="download-row">
+        <a id="enroll-device-link" class="download" href="/api/devices/enroll.mobileconfig">登记这台 iPhone / iPad</a>
       </div>
+      <p id="enrollment-availability" class="meta">正在检查设备登记条件…</p>
+      <p class="meta">提交设备信息后，管理员仍需要在 Apple Developer Team 中注册该设备并重新导出 Ad Hoc IPA。登记成功不代表当前已有的 IPA 会自动支持这台新设备。</p>
     </article>
 
     <article class="panel-card">
-      <div class="section-heading"><div><h2>Mac 签名服务</h2><span class="meta">兼容预配置 archive 流程</span></div></div>
+      <div class="section-heading"><div><h2>可安装的 iOS 版本</h2><span class="meta">当前项目</span></div></div>
+      <div id="ios-install-releases"></div>
+    </article>
+
+    <article class="panel-card" data-admin hidden>
+      <div class="section-heading"><div><h2>设备管理</h2><span class="meta">管理员</span></div></div>
+      <p>这里会显示收集到的完整 UDID，仅管理员可见。</p>
+      <button id="devices-button" type="button">查看待登记设备</button>
+      <pre id="devices-list" hidden></pre>
+    </article>
+
+    <article class="panel-card" data-admin hidden>
+      <div class="section-heading"><div><h2>Mac 签名服务</h2><span class="meta">管理员 · 兼容流程</span></div></div>
       <p>使用 ILS 已配置的 Xcode archive 进行签名与发布。新的项目发布优先使用 Release Profile。</p>
       <button id="sign-button">请求 Mac 签名</button>
       <p id="sign-state" role="status"></p>
     </article>
 
-    <article class="panel-card">
-      <div class="section-heading"><div><h2>TestFlight</h2><span class="meta">App Store Connect</span></div></div>
-      <p>TestFlight 通过 <code>ios-testflight</code> Release Profile 执行。上传成功与 Apple Processing / tester availability 分开记录。</p>
+    <article class="panel-card" data-admin hidden>
+      <div class="section-heading"><div><h2>TestFlight</h2><span class="meta">管理员 · App Store Connect</span></div></div>
+      <p>TestFlight 是独立发布流程，不会和 Ad Hoc 一键同时执行。通过 <code>ios-testflight</code> Release Profile 单独提交。</p>
       <button type="button" data-go-view="builds">前往构建与发布</button>
     </article>
   </section>
