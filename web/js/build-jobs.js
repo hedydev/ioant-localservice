@@ -3,17 +3,36 @@ import {$,state,api,escapeHTML,formatDate} from './core.js';
 import {buildState} from './build-state.js';
 import {platformIcons,targetsForJob} from './platform-ui.js';
 
-function updateBuildLog(text){
- const element=$('#build-log');
- const firstOpen=element.hidden;
- const distanceFromBottom=element.scrollHeight-element.scrollTop-element.clientHeight;
- const wasFollowing=firstOpen||buildState.followLog||distanceFromBottom<64;
+function logElement(jobID){
+ return document.getElementById('build-log-'+jobID);
+}
+
+function updateBuildLog(jobID,text){
+ const element=logElement(jobID);
+ if(!element)return;
+ const firstOpen=!buildState.logLoaded;
+ const wasFollowing=firstOpen||buildState.followLog;
  element.textContent=text;
- element.hidden=false;
+ buildState.logLoaded=true;
  if(wasFollowing){
   element.scrollTop=element.scrollHeight;
   buildState.followLog=true;
+  buildState.logScrollTop=element.scrollTop;
+ }else{
+  const maxScroll=Math.max(0,element.scrollHeight-element.clientHeight);
+  element.scrollTop=Math.min(buildState.logScrollTop,maxScroll);
  }
+}
+
+function chooseRunningLog(jobs){
+ if(buildState.activeLog&&jobs.some(job=>job.id===buildState.activeLog))return;
+ if(buildState.activeLog)buildState.activeLog=null;
+ const running=jobs.find(job=>job.status==='running'&&!buildState.collapsedLogs.has(job.id));
+ if(!running)return;
+ buildState.activeLog=running.id;
+ buildState.followLog=true;
+ buildState.logLoaded=false;
+ buildState.logScrollTop=0;
 }
 
 function stageLabel(job){
@@ -73,25 +92,36 @@ function pipelineView(job){
 function renderJobs(jobs){
  jobs=[...jobs].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
  if(!jobs.length){
+  buildState.activeLog=null;
   $('#build-jobs').innerHTML='<div class="empty"><strong>还没有构建任务</strong>运行 Release Profile 后，任务状态会显示在这里。</div>';
   return;
  }
+
+ chooseRunningLog(jobs);
+
  $('#build-jobs').innerHTML=jobs.map(job=>{
   const releases=job.release_ids||[];
-  return '<article class="build-job">'+
-   '<div class="build-job-main">'+
-    '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
-    '<div class="build-title-row"><strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
-    '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
-    pipelineView(job)+
-    (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+
-    progressView(job)+
-    (job.error?'<p>'+escapeHTML(job.error)+'</p>':'')+
-    resultView(job)+
-    (releases.length?'<div class="meta">关联安装包：'+releases.length+' 个</div>':'')+
-    releases.map(release=>'<a class="build-artifact" href="/api/releases/'+escapeHTML(release)+'/download">下载 '+escapeHTML(release.slice(0,8))+'</a>').join(' ')+
+  const expanded=buildState.activeLog===job.id;
+  const logID='build-log-'+job.id;
+  return '<article class="build-job'+(expanded?' log-expanded':'')+'">'+
+   '<div class="build-job-row">'+
+    '<div class="build-job-main">'+
+     '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
+     '<div class="build-title-row"><strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
+     '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
+     pipelineView(job)+
+     (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+
+     progressView(job)+
+     (job.error?'<p>'+escapeHTML(job.error)+'</p>':'')+
+     resultView(job)+
+     (releases.length?'<div class="meta">关联安装包：'+releases.length+' 个</div>':'')+
+     releases.map(release=>'<a class="build-artifact" href="/api/releases/'+escapeHTML(release)+'/download">下载 '+escapeHTML(release.slice(0,8))+'</a>').join(' ')+
+    '</div>'+
+    '<button data-build-log="'+escapeHTML(job.id)+'" aria-expanded="'+(expanded?'true':'false')+'" aria-controls="'+escapeHTML(logID)+'">'+(expanded?'收起日志':'查看日志')+'</button>'+
    '</div>'+
-   '<button data-build-log="'+escapeHTML(job.id)+'">查看日志</button>'+
+   (expanded
+    ?'<div class="build-log-panel"><div class="build-log-heading"><strong>'+(job.status==='running'?'实时日志':'任务日志')+'</strong><span class="meta">'+(job.status==='running'?'任务执行时自动跟随最新输出':'已保存的任务输出')+'</span></div><pre class="build-log-output" id="'+escapeHTML(logID)+'" data-build-log-output="'+escapeHTML(job.id)+'" aria-label="'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+' 构建日志"></pre></div>'
+    :'')+
   '</article>';
  }).join('');
 }
@@ -107,7 +137,7 @@ export async function loadBuildJobs(){
   if(buildState.activeLog){
    const data=await api('/api/builds/'+buildState.activeLog+'/log');
    if(project!==state.project)return;
-   updateBuildLog(data.log);
+   updateBuildLog(buildState.activeLog,data.log);
   }
  }catch(error){
   if(project===state.project)$('#build-jobs').innerHTML='<p class="form-error">'+escapeHTML(error.message)+'</p>';
@@ -118,32 +148,46 @@ export async function loadBuildJobs(){
 
 function resetJobs(){
  buildState.activeLog=null;
+ buildState.collapsedLogs.clear();
  buildState.followLog=true;
+ buildState.logLoaded=false;
+ buildState.logScrollTop=0;
  buildState.jobsLoading=false;
  $('#build-jobs').innerHTML='';
- $('#build-log').textContent='';
- $('#build-log').hidden=true;
 }
 
 export function initBuildJobs(){
  $('#build-jobs').onclick=event=>{
   const button=event.target.closest('[data-build-log]');
   if(!button)return;
-  buildState.activeLog=button.dataset.buildLog;
+  const jobID=button.dataset.buildLog;
+  if(buildState.activeLog===jobID){
+   buildState.activeLog=null;
+   buildState.collapsedLogs.add(jobID);
+  }else{
+   buildState.activeLog=jobID;
+   buildState.collapsedLogs.delete(jobID);
+  }
   buildState.followLog=true;
-  $('#build-log').hidden=true;
+  buildState.logLoaded=false;
+  buildState.logScrollTop=0;
   loadBuildJobs();
  };
 
- $('#build-log').addEventListener('scroll',()=>{
-  const element=$('#build-log');
+ $('#build-jobs').addEventListener('scroll',event=>{
+  const element=event.target.closest('[data-build-log-output]');
+  if(!element)return;
   buildState.followLog=(element.scrollHeight-element.scrollTop-element.clientHeight)<64;
- });
+  buildState.logScrollTop=element.scrollTop;
+ },true);
 
  window.addEventListener('build-started',event=>{
-  buildState.activeLog=event.detail.job.id;
+  const jobID=event.detail.job.id;
+  buildState.activeLog=jobID;
+  buildState.collapsedLogs.delete(jobID);
   buildState.followLog=true;
-  $('#build-log').hidden=true;
+  buildState.logLoaded=false;
+  buildState.logScrollTop=0;
   loadBuildJobs();
  });
  window.addEventListener('project-changed',resetJobs);

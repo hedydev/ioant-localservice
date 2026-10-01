@@ -78,9 +78,12 @@ Shared action helpers may be imported when they represent a real reusable operat
 
 `build-jobs.js` owns the live build-log behavior:
 
+- the active task's log renders inside that task card, directly below its status/progress/result UI; there is no page-level fixed log panel;
+- a running task auto-expands its log unless the user explicitly collapsed that task;
+- only one task log is expanded at a time; historical tasks can be opened with **查看日志** and collapsed with **收起日志**;
 - first open scrolls to the newest output;
 - while the user remains near the bottom, new output auto-follows;
-- scrolling upward pauses following;
+- scrolling upward pauses following and the scroll position is preserved across the three-second job refresh;
 - returning near the bottom resumes following;
 - standard `ILS_EVENT` progress remains authoritative;
 - while an Xcode build/archive/export/upload/notarize stage is active, native `Progress N%: message` output is parsed as real task progress and shown in the build card instead of a fabricated percentage.

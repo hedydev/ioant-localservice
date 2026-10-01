@@ -170,11 +170,18 @@
 
 .build-job {
   padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
+.build-job-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  border-top: 1px solid var(--line);
   align-items: flex-start;
+}
+
+.build-job-row > button {
+  flex: 0 0 auto;
 }
 
 .build-job-main {
@@ -193,13 +200,44 @@
   color: #246e52;
 }
 
-#build-log {
+.build-log-panel {
+  margin-top: 13px;
+  border: 1px solid #283c50;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #182736;
+}
+
+.build-log-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 13px;
+  border-bottom: 1px solid #30475d;
+  color: #dce8f4;
+  font-size: .78rem;
+}
+
+.build-log-heading .meta {
+  color: #9fb0c0;
+  margin: 0;
+}
+
+.build-log-output {
   max-height: 440px;
+  min-height: 120px;
+  margin: 0;
   overflow: auto;
   white-space: pre-wrap;
   background: #182736;
   color: #dce8f4;
+  border-radius: 0;
   font-size: .8125rem;
+}
+
+.build-job.log-expanded {
+  padding-bottom: 18px;
 }
 
 .job-progress {
@@ -298,6 +336,20 @@
 
   .profile-actions {
     justify-content: flex-end;
+  }
+
+  .build-job-row {
+    flex-direction: column;
+  }
+
+  .build-job-row > button {
+    align-self: flex-end;
+  }
+
+  .build-log-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .dialog-actions {
