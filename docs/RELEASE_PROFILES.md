@@ -64,6 +64,10 @@ ILS then runs `git pull --ff-only` with Git hooks and autostash disabled. It doe
 | `result_contract` | Preferred: `ils-result-v1`; empty keeps legacy artifact-field behavior |
 | `apple_team_id` | Optional 10-character Apple Team ID. ILS exposes detected local signing teams in the Profile UI and exports the selected value as `ILS_APPLE_TEAM_ID`. Required by the UI when multiple signing teams are detected for an iOS profile. |
 | `testflight_url` | Optional fallback Apple TestFlight invitation URL. Valid only for `ios-testflight`. When App Store Connect exposes an enabled Beta Group public link, that API-derived link takes priority. |
+| `testflight_group_name` | Optional exact TestFlight Group name for automatic distribution after Apple finishes processing the Build Upload. |
+| `testflight_group_type` | `internal` or `external`; defaults to `internal` when a group name is configured. |
+| `testflight_create_group` | When true, create the named TestFlight Group if it does not exist. |
+| `testflight_submit_beta_review` | External groups only. Explicitly submit the processed Build for Beta App Review after group assignment. |
 | `build_command` | Shell command executed from the linked project directory |
 | `package_command` | Optional second command |
 | `artifact` | Legacy mode only: relative artifact path/glob or path under `$ILS_OUTPUT_DIR` |
@@ -166,7 +170,7 @@ Example:
 
 For this lane ILS requires an explicit successful App Store Connect submission result. It does **not** create a fake IPA artifact, but it does create a normal ILS Release metadata record with `delivery=testflight`. That release participates in the same Overview, Release History, iOS release list, filters and counts as Ad Hoc/macOS releases.
 
-The TestFlight Release starts at **submitted to App Store Connect**. This is intentionally different from “TestFlight available”. When App Store Connect API access is configured, ILS resolves the release by `bundle_id + marketing version + build number`, reads Apple Processing and beta-detail state, and updates the same Release record to `processing`, `available`, or `unavailable`. Without API access, the release remains submitted rather than inventing later states.
+The TestFlight Release starts at **submitted to App Store Connect**. This is intentionally different from “TestFlight available”. When App Store Connect API access is configured, ILS first resolves the matching **Build Upload** by `bundle_id + marketing version + build number` and mirrors its `AWAITING_UPLOAD / PROCESSING / FAILED / COMPLETE` state. Only after Apple reports `COMPLETE` does ILS continue through the normal Build, Build Beta Detail, Group/public-link and optional distribution-automation stages. Without API access, the release remains submitted rather than inventing later states.
 
 If Apple exposes an enabled Beta Group public link, ILS stores it separately as `testflight.public_link` and uses it as the release action. The optional Release Profile `testflight_url` is retained as `testflight.fallback_url`. On every successful Apple refresh, the effective `open_url` is recalculated as public link → profile fallback → empty, so a disabled Apple public link cannot remain stale in ILS.
 
@@ -201,6 +205,9 @@ iOS TestFlight:
   "lane": "ios-testflight",
   "result_contract": "ils-result-v1",
   "apple_team_id": "YOURTEAMID",
+  "testflight_group_name": "Internal Test Group",
+  "testflight_group_type": "internal",
+  "testflight_create_group": true,
   "build_command": "bash scripts/ils-build-ios.sh --testflight"
 }
 ```
@@ -269,6 +276,6 @@ ILS can keep TestFlight Release status synchronized through the official App Sto
 
 ILS stores the identifiers and local path in its own protected data directory. It never stores the private-key contents in project configuration or Git and never returns the key contents to the browser. A Team API Key is also exposed to a TestFlight project script through `ILS_ASC_KEY_ID`, `ILS_ASC_KEY_PATH`, and `ILS_ASC_ISSUER_ID` because xcodebuild distribution authentication requires the issuer. An Individual API Key is used for App Store Connect status queries only; the project upload continues to use the Apple account already signed into Xcode.
 
-The status resolver reads the App Store Connect app by Bundle ID, prerelease version, build processing state, Build Beta Detail, and Beta Group public link. ILS rate-limits background refreshes and also provides an explicit **Refresh Release Status** action.
+The status resolver reads Build Upload first, then the App Store Connect Build, Build Beta Detail, and Beta Group/public-link state. A configured target Group can be created/resolved and associated automatically after the Build is valid. External Beta App Review submission is opt-in rather than implicit. ILS rate-limits background refreshes and also provides an explicit **Refresh Release Status** action.
 
 See [APP_STORE_CONNECT.md](APP_STORE_CONNECT.md) for configuration and status semantics.

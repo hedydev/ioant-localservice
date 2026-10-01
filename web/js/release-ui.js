@@ -10,6 +10,14 @@ const statusLabels={
 };
 
 export function releaseStatusLabel(release){
+ if(release?.delivery==='testflight'){
+  const upload=release.testflight?.build_upload_state;
+  const external=release.testflight?.external_build_state;
+  if(upload==='FAILED')return 'Build Upload Failed';
+  if(upload==='PROCESSING')return 'Build Upload Processing';
+  if(upload==='COMPLETE'&&external==='READY_FOR_BETA_SUBMISSION')return 'Ready to Submit';
+  if(upload==='COMPLETE'&&release.status!=='available'&&release.status!=='unavailable')return 'Build Upload Complete';
+ }
  return statusLabels[release?.status]||release?.status||'已发布';
 }
 
@@ -22,6 +30,7 @@ export function releaseDeliveryLabel(release){
 export function releaseInstallNote(release){
  if(release.delivery==='testflight'){
   const parts=[release.status_message||releaseStatusLabel(release)];
+  if(release.testflight?.build_upload_state)parts.push('Build Upload '+release.testflight.build_upload_state);
   if(release.testflight?.internal_build_state)parts.push('Internal '+release.testflight.internal_build_state);
   if(release.testflight?.external_build_state)parts.push('External '+release.testflight.external_build_state);
   return parts.join(' · ');
@@ -98,11 +107,15 @@ function releaseDetailsView(release){
  let details='<details><summary>发布信息</summary><p>'+escapeHTML(releaseInstallNote(release))+'</p>';
  if(release.delivery==='testflight'){
   details+='<p>'+escapeHTML(release.bundle_id||'')+' · TestFlight</p>';
-  if(release.testflight?.processing_state)details+='<p>Apple Processing: '+escapeHTML(release.testflight.processing_state)+'</p>';
+  if(release.testflight?.build_upload_state)details+='<p>Build Upload: '+escapeHTML(release.testflight.build_upload_state)+'</p>';
+  if(release.testflight?.processing_state)details+='<p>Build Processing: '+escapeHTML(release.testflight.processing_state)+'</p>';
   if(release.testflight?.internal_build_state)details+='<p>Internal Beta: '+escapeHTML(release.testflight.internal_build_state)+'</p>';
   if(release.testflight?.external_build_state)details+='<p>External Beta: '+escapeHTML(release.testflight.external_build_state)+'</p>';
   if(release.testflight?.public_link)details+='<p>Public Link: '+escapeHTML(release.testflight.public_link)+'</p>';
   if(release.testflight?.fallback_url)details+='<p>Profile fallback: '+escapeHTML(release.testflight.fallback_url)+'</p>';
+  if(release.testflight?.target_group_name)details+='<p>TestFlight Group: '+escapeHTML(release.testflight.target_group_name)+' · '+escapeHTML(release.testflight.target_group_type||'internal')+(release.testflight.beta_group_assigned?' · 已关联':'')+'</p>';
+  if(release.testflight?.beta_review_state)details+='<p>Beta Review: '+escapeHTML(release.testflight.beta_review_state)+'</p>';
+  if(release.testflight?.automation_error)details+='<p class="form-error">自动分发：'+escapeHTML(release.testflight.automation_error)+'</p>';
   if(release.testflight?.last_error)details+='<p class="form-error">'+escapeHTML(release.testflight.last_error)+'</p>';
  }else{
   details+='<p>'+escapeHTML(release.filename||'')+'</p><code>SHA-256: '+escapeHTML(release.sha256||'')+'</code>';

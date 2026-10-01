@@ -72,6 +72,8 @@ function stageLabel(job){
  };
  if(job.status==='running')return stages[job.stage]||'处理中';
  if(job.status==='succeeded'&&laneFor(job)==='ios-testflight'){
+  const release=linkedRelease(job);
+  if(release)return releaseStatusLabel(release);
   if(job.stage_state==='failed')return 'TestFlight 当前不可测试';
   if(job.stage==='available')return 'TestFlight 可测试';
   if(job.stage==='processing')return 'Apple Processing';

@@ -64,7 +64,12 @@ function profileSummary(profile){
   :'产物：'+profile.artifact;
  const team=profile.apple_team_id?'<br>Apple Team · '+escapeHTML(profile.apple_team_id):'';
  const testflight=profile.testflight_url?'<br>TestFlight 邀请链接已配置':'';
- return platformIcons(targetsForProfile(profile))+(profile.platform==='ios'?'iOS':profile.platform==='macos'?'macOS':escapeHTML(profile.platform))+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+'<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team+testflight;
+ const group=profile.testflight_group_name
+  ?'<br>TestFlight Group · '+escapeHTML(profile.testflight_group_name)+' · '+escapeHTML(profile.testflight_group_type||'internal')+
+   (profile.testflight_create_group?' · 不存在时自动创建':'')+
+   (profile.testflight_submit_beta_review?' · 自动提交 Beta Review':'')
+  :'';
+ return platformIcons(targetsForProfile(profile))+(profile.platform==='ios'?'iOS':profile.platform==='macos'?'macOS':escapeHTML(profile.platform))+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+'<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team+testflight+group;
 }
 
 function renderProfiles(){
@@ -127,8 +132,22 @@ function syncProfileForm(){
  const testflight=lane.value==='ios-testflight';
  form.elements.apple_team_id.required=platform==='ios'&&multipleTeams;
  $('#profile-testflight-url-field').hidden=!testflight;
+ $('#profile-testflight-automation').hidden=!testflight;
  form.elements.testflight_url.disabled=!testflight;
- if(!testflight)form.elements.testflight_url.value='';
+ form.elements.testflight_group_name.disabled=!testflight;
+ form.elements.testflight_group_type.disabled=!testflight;
+ form.elements.testflight_create_group.disabled=!testflight;
+ form.elements.testflight_submit_beta_review.disabled=!testflight;
+ const external=testflight&&form.elements.testflight_group_type.value==='external';
+ form.elements.testflight_submit_beta_review.disabled=!external;
+ if(!testflight){
+  form.elements.testflight_url.value='';
+  form.elements.testflight_group_name.value='';
+  form.elements.testflight_group_type.value='internal';
+  form.elements.testflight_create_group.checked=false;
+  form.elements.testflight_submit_beta_review.checked=false;
+ }
+ if(!external)form.elements.testflight_submit_beta_review.checked=false;
  form.elements.artifact.required=legacy;
  form.elements.version_command.required=legacy&&platform==='macos';
  form.elements.build_number_command.required=legacy&&platform==='macos';
@@ -157,7 +176,9 @@ function openProfile(profile=null){
  const selectedTeam=profile?.apple_team_id||'';
  if(profile){
   for(const [key,value] of Object.entries(profile)){
-   if(key!=='apple_team_id'&&form.elements[key])form.elements[key].value=value??'';
+   if(key==='apple_team_id'||!form.elements[key])continue;
+   if(form.elements[key].type==='checkbox')form.elements[key].checked=Boolean(value);
+   else form.elements[key].value=value??'';
   }
  }
  form.elements.apple_team_id.innerHTML='<option value="">正在读取 Apple Team…</option>';
@@ -180,6 +201,7 @@ export function initBuildProfiles(){
  $('#profile-form [name=platform]').onchange=syncProfileForm;
  $('#profile-form [name=lane]').onchange=syncProfileForm;
  $('#profile-form [name=result_contract]').onchange=syncProfileForm;
+ $('#profile-form [name=testflight_group_type]').onchange=syncProfileForm;
 
  $('#release-profiles').onclick=event=>{
   const create=event.target.closest('[data-create-profile]');
@@ -201,6 +223,8 @@ export function initBuildProfiles(){
   const button=event.target.querySelector('[type=submit]');
   button.disabled=true;
   const data=Object.fromEntries(new FormData(event.target));
+  data.testflight_create_group=event.target.elements.testflight_create_group.checked;
+  data.testflight_submit_beta_review=event.target.elements.testflight_submit_beta_review.checked;
   try{
    await api('/api/projects/'+state.project+'/release-profiles',{
     method:'POST',

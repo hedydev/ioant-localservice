@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	cryptorand "crypto/rand"
 	"crypto/ecdsa"
@@ -47,14 +48,24 @@ type AppStoreConnectConfigStatus struct {
 }
 
 type TestFlightReleaseInfo struct {
-	AppleBuildID       string     `json:"apple_build_id,omitempty"`
-	ProcessingState    string     `json:"processing_state,omitempty"`
-	InternalBuildState string     `json:"internal_build_state,omitempty"`
-	ExternalBuildState string     `json:"external_build_state,omitempty"`
-	PublicLink         string     `json:"public_link,omitempty"`
-	FallbackURL        string     `json:"fallback_url,omitempty"`
-	LastCheckedAt      *time.Time `json:"last_checked_at,omitempty"`
-	LastError          string     `json:"last_error,omitempty"`
+	BuildUploadID        string     `json:"build_upload_id,omitempty"`
+	BuildUploadState     string     `json:"build_upload_state,omitempty"`
+	AppleBuildID         string     `json:"apple_build_id,omitempty"`
+	ProcessingState      string     `json:"processing_state,omitempty"`
+	InternalBuildState   string     `json:"internal_build_state,omitempty"`
+	ExternalBuildState   string     `json:"external_build_state,omitempty"`
+	PublicLink           string     `json:"public_link,omitempty"`
+	FallbackURL          string     `json:"fallback_url,omitempty"`
+	TargetGroupName      string     `json:"target_group_name,omitempty"`
+	TargetGroupType      string     `json:"target_group_type,omitempty"`
+	AutoCreateGroup      bool       `json:"auto_create_group,omitempty"`
+	AutoSubmitBetaReview bool       `json:"auto_submit_beta_review,omitempty"`
+	BetaGroupID          string     `json:"beta_group_id,omitempty"`
+	BetaGroupAssigned    bool       `json:"beta_group_assigned,omitempty"`
+	BetaReviewState      string     `json:"beta_review_state,omitempty"`
+	AutomationError      string     `json:"automation_error,omitempty"`
+	LastCheckedAt        *time.Time `json:"last_checked_at,omitempty"`
+	LastError            string     `json:"last_error,omitempty"`
 }
 
 type ascResource struct {
@@ -68,10 +79,33 @@ type ascListResponse struct {
 	Included []ascResource `json:"included,omitempty"`
 }
 
+type ascSingleResponse struct {
+	Data     ascResource   `json:"data"`
+	Included []ascResource `json:"included,omitempty"`
+}
+
+type ascLinkage struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+type ascLinkageResponse struct {
+	Data []ascLinkage `json:"data"`
+}
+
 type ascBuildAttributes struct {
 	Version         string `json:"version"`
 	ProcessingState string `json:"processingState"`
 	Expired         bool   `json:"expired"`
+}
+
+type ascBuildUploadAttributes struct {
+	CFBundleShortVersionString string `json:"cfBundleShortVersionString"`
+	CFBundleVersion            string `json:"cfBundleVersion"`
+	State                      string `json:"state"`
+	Platform                   string `json:"platform"`
+	CreatedDate                string `json:"createdDate"`
+	UploadedDate               string `json:"uploadedDate"`
 }
 
 type ascBetaDetailAttributes struct {
@@ -82,8 +116,13 @@ type ascBetaDetailAttributes struct {
 type ascBetaGroupAttributes struct {
 	Name              string `json:"name"`
 	IsInternalGroup   bool   `json:"isInternalGroup"`
+	HasAccessToAllBuilds bool `json:"hasAccessToAllBuilds"`
 	PublicLinkEnabled bool   `json:"publicLinkEnabled"`
 	PublicLink        string `json:"publicLink"`
+}
+
+type ascBetaReviewAttributes struct {
+	BetaReviewState string `json:"betaReviewState"`
 }
 
 type ascErrorResponse struct {
@@ -260,6 +299,39 @@ func ascGET(ctx context.Context, cfg AppStoreConnectConfig, path string, query u
 	}
 	dec := json.NewDecoder(io.LimitReader(resp.Body, 4<<20))
 	if e = dec.Decode(target); e != nil {
+		return fmt.Errorf("App Store Connect 响应格式无效")
+	}
+	return nil
+}
+
+func ascPOST(ctx context.Context, cfg AppStoreConnectConfig, path string, body any, target any) error {
+	token, e := ascJWT(cfg, time.Now().UTC())
+	if e != nil {
+		return e
+	}
+	raw, e := json.Marshal(body)
+	if e != nil {
+		return e
+	}
+	req, e := http.NewRequestWithContext(ctx, http.MethodPost, appStoreConnectOrigin+path, bytes.NewReader(raw))
+	if e != nil {
+		return e
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, e := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if e != nil {
+		return fmt.Errorf("无法连接 App Store Connect：%v", e)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ascAPIError(resp)
+	}
+	if target == nil || resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if e = json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(target); e != nil {
 		return fmt.Errorf("App Store Connect 响应格式无效")
 	}
 	return nil
@@ -489,6 +561,46 @@ func (r *ascResolver) preReleaseVersionID(ctx context.Context, appID, version st
 	return response.Data[0].ID, nil
 }
 
+func buildUploadState(state string) (string, string, bool) {
+	switch state {
+	case "AWAITING_UPLOAD":
+		return "submitted", "Apple Build Upload 正在等待上传完成", false
+	case "PROCESSING":
+		return "processing", "Apple Build Upload 正在 Processing", false
+	case "FAILED":
+		return "unavailable", "Apple Build Upload Processing 失败", false
+	case "COMPLETE":
+		return "processing", "Apple Build Upload 已完成；正在读取 TestFlight Build 状态", true
+	case "":
+		return "submitted", "App Store Connect 尚未返回 Build Upload 状态", true
+	default:
+		return "submitted", "Apple Build Upload 状态：" + state, false
+	}
+}
+
+func (r *ascResolver) latestBuildUpload(ctx context.Context, appID string, release Release) (ascResource, ascBuildUploadAttributes, bool, error) {
+	query := url.Values{}
+	query.Set("filter[cfBundleShortVersionString]", release.Version)
+	query.Set("filter[cfBundleVersion]", fmt.Sprintf("%d", release.Build))
+	query.Set("filter[platform]", "IOS")
+	query.Set("fields[buildUploads]", "cfBundleShortVersionString,cfBundleVersion,createdDate,state,platform,uploadedDate")
+	query.Set("sort", "-uploadedDate")
+	query.Set("limit", "10")
+	var response ascListResponse
+	if e := ascGET(ctx, r.cfg, "/v1/apps/"+url.PathEscape(appID)+"/buildUploads", query, &response); e != nil {
+		return ascResource{}, ascBuildUploadAttributes{}, false, e
+	}
+	if len(response.Data) == 0 {
+		return ascResource{}, ascBuildUploadAttributes{}, false, nil
+	}
+	upload := response.Data[0]
+	var attributes ascBuildUploadAttributes
+	if json.Unmarshal(upload.Attributes, &attributes) != nil {
+		return ascResource{}, ascBuildUploadAttributes{}, false, fmt.Errorf("App Store Connect build upload attributes 无效")
+	}
+	return upload, attributes, true, nil
+}
+
 func betaAvailable(state string) bool {
 	return state == "READY_FOR_BETA_TESTING" || state == "IN_BETA_TESTING"
 }
@@ -523,12 +635,147 @@ func testFlightState(processing, internal, external string, expired bool) (strin
 	case external == "IN_BETA_REVIEW":
 		return "processing", "TestFlight Beta Review 进行中"
 	case external == "READY_FOR_BETA_SUBMISSION":
-		return "processing", "Apple 已处理完成；等待提交外部 TestFlight Beta Review"
+		return "processing", "TestFlight Ready to Submit；尚未进入测试"
 	case external == "BETA_APPROVED":
 		return "processing", "外部 TestFlight Beta Review 已批准；等待可测试状态"
 	default:
 		return "processing", "Apple 已完成二进制处理；等待 TestFlight 可测试状态"
 	}
+}
+
+func (r *ascResolver) betaGroup(ctx context.Context, appID string, info *TestFlightReleaseInfo) (ascResource, ascBetaGroupAttributes, bool) {
+	if info.TargetGroupName == "" {
+		return ascResource{}, ascBetaGroupAttributes{}, false
+	}
+	query := url.Values{}
+	query.Set("filter[app]", appID)
+	query.Set("filter[name]", info.TargetGroupName)
+	query.Set("fields[betaGroups]", "name,isInternalGroup,hasAccessToAllBuilds,publicLinkEnabled,publicLink")
+	query.Set("limit", "20")
+	var response ascListResponse
+	if e := ascGET(ctx, r.cfg, "/v1/betaGroups", query, &response); e != nil {
+		info.AutomationError = "读取 TestFlight Group 失败：" + e.Error()
+		return ascResource{}, ascBetaGroupAttributes{}, false
+	}
+	wantInternal := info.TargetGroupType != "external"
+	for _, item := range response.Data {
+		var attrs ascBetaGroupAttributes
+		if json.Unmarshal(item.Attributes, &attrs) != nil || attrs.Name != info.TargetGroupName || attrs.IsInternalGroup != wantInternal {
+			continue
+		}
+		return item, attrs, true
+	}
+	if !info.AutoCreateGroup {
+		info.AutomationError = "未找到 TestFlight Group “" + info.TargetGroupName + "”"
+		return ascResource{}, ascBetaGroupAttributes{}, false
+	}
+	body := map[string]any{
+		"data": map[string]any{
+			"type": "betaGroups",
+			"attributes": map[string]any{
+				"name": info.TargetGroupName,
+				"isInternalGroup": wantInternal,
+				"hasAccessToAllBuilds": false,
+			},
+			"relationships": map[string]any{
+				"app": map[string]any{
+					"data": map[string]any{"type": "apps", "id": appID},
+				},
+			},
+		},
+	}
+	var created ascSingleResponse
+	if e := ascPOST(ctx, r.cfg, "/v1/betaGroups", body, &created); e != nil {
+		info.AutomationError = "创建 TestFlight Group 失败：" + e.Error()
+		return ascResource{}, ascBetaGroupAttributes{}, false
+	}
+	var attrs ascBetaGroupAttributes
+	if json.Unmarshal(created.Data.Attributes, &attrs) != nil {
+		info.AutomationError = "新建 TestFlight Group 响应无效"
+		return ascResource{}, ascBetaGroupAttributes{}, false
+	}
+	return created.Data, attrs, true
+}
+
+func (r *ascResolver) assignBuildToBetaGroup(ctx context.Context, buildID string, group ascResource, attrs ascBetaGroupAttributes, info *TestFlightReleaseInfo) {
+	info.BetaGroupID = group.ID
+	if attrs.PublicLinkEnabled && strings.HasPrefix(attrs.PublicLink, "https://testflight.apple.com/") {
+		info.PublicLink = attrs.PublicLink
+	}
+	var links ascLinkageResponse
+	if e := ascGET(ctx, r.cfg, "/v1/betaGroups/"+url.PathEscape(group.ID)+"/relationships/builds", url.Values{"limit": {"200"}}, &links); e != nil {
+		info.AutomationError = "检查 TestFlight Group Build 失败：" + e.Error()
+		return
+	}
+	for _, link := range links.Data {
+		if link.Type == "builds" && link.ID == buildID {
+			info.BetaGroupAssigned = true
+			return
+		}
+	}
+	body := map[string]any{"data": []map[string]string{{"type": "builds", "id": buildID}}}
+	if e := ascPOST(ctx, r.cfg, "/v1/betaGroups/"+url.PathEscape(group.ID)+"/relationships/builds", body, nil); e != nil {
+		info.AutomationError = "加入 TestFlight Group 失败：" + e.Error()
+		return
+	}
+	info.BetaGroupAssigned = true
+}
+
+func (r *ascResolver) ensureBetaReview(ctx context.Context, buildID string, info *TestFlightReleaseInfo) {
+	if !info.AutoSubmitBetaReview || info.TargetGroupType != "external" || !info.BetaGroupAssigned {
+		return
+	}
+	query := url.Values{}
+	query.Set("filter[build]", buildID)
+	query.Set("fields[betaAppReviewSubmissions]", "betaReviewState,submittedDate")
+	query.Set("limit", "1")
+	var response ascListResponse
+	if e := ascGET(ctx, r.cfg, "/v1/betaAppReviewSubmissions", query, &response); e != nil {
+		info.AutomationError = "读取 Beta App Review 状态失败：" + e.Error()
+		return
+	}
+	if len(response.Data) > 0 {
+		var attrs ascBetaReviewAttributes
+		if json.Unmarshal(response.Data[0].Attributes, &attrs) == nil {
+			info.BetaReviewState = attrs.BetaReviewState
+		}
+		return
+	}
+	body := map[string]any{
+		"data": map[string]any{
+			"type": "betaAppReviewSubmissions",
+			"relationships": map[string]any{
+				"build": map[string]any{
+					"data": map[string]any{"type": "builds", "id": buildID},
+				},
+			},
+		},
+	}
+	var created ascSingleResponse
+	if e := ascPOST(ctx, r.cfg, "/v1/betaAppReviewSubmissions", body, &created); e != nil {
+		info.AutomationError = "自动提交 Beta App Review 失败：" + e.Error()
+		return
+	}
+	var attrs ascBetaReviewAttributes
+	if json.Unmarshal(created.Data.Attributes, &attrs) == nil {
+		info.BetaReviewState = attrs.BetaReviewState
+	}
+}
+
+func (r *ascResolver) automateTestFlightDistribution(ctx context.Context, appID, buildID string, info *TestFlightReleaseInfo) {
+	info.AutomationError = ""
+	if info.TargetGroupName == "" {
+		return
+	}
+	group, attrs, ok := r.betaGroup(ctx, appID, info)
+	if !ok {
+		return
+	}
+	r.assignBuildToBetaGroup(ctx, buildID, group, attrs, info)
+	if info.AutomationError != "" {
+		return
+	}
+	r.ensureBetaReview(ctx, buildID, info)
 }
 
 func testFlightFallbackURL(release Release) string {
@@ -561,12 +808,41 @@ func (r *ascResolver) testFlight(ctx context.Context, release Release) (testFlig
 		result.StatusMessage = "App Store Connect 未找到此 Bundle ID；请检查 App Record 与 API Key 权限"
 		return result, nil
 	}
+
+	if release.TestFlight != nil {
+		info.TargetGroupName = release.TestFlight.TargetGroupName
+		info.TargetGroupType = release.TestFlight.TargetGroupType
+		info.AutoCreateGroup = release.TestFlight.AutoCreateGroup
+		info.AutoSubmitBetaReview = release.TestFlight.AutoSubmitBetaReview
+	}
+	upload, uploadAttributes, uploadFound, uploadErr := r.latestBuildUpload(ctx, appID, release)
+	if uploadErr != nil {
+		return result, uploadErr
+	}
+	if uploadFound {
+		info.BuildUploadID = upload.ID
+		info.BuildUploadState = uploadAttributes.State
+		status, message, continueToBuild := buildUploadState(uploadAttributes.State)
+		result.Status = status
+		result.StatusMessage = message
+		result.Info = info
+		if !continueToBuild {
+			return result, nil
+		}
+	}
+
 	preID, e := r.preReleaseVersionID(ctx, appID, release.Version)
 	if e != nil {
 		return result, e
 	}
 	if preID == "" {
-		result.StatusMessage = "已找到 App，但 Apple 尚未暴露这个 iOS 版本；可能仍在同步"
+		if info.BuildUploadState == "COMPLETE" {
+			result.Status = "processing"
+			result.StatusMessage = "Apple Build Upload 已完成；等待 TestFlight prerelease version 可见"
+		} else {
+			result.StatusMessage = "已找到 App，但 Apple 尚未暴露这个 iOS 版本；可能仍在同步"
+		}
+		result.Info = info
 		return result, nil
 	}
 	query := url.Values{}
@@ -583,7 +859,13 @@ func (r *ascResolver) testFlight(ctx context.Context, release Release) (testFlig
 		return result, e
 	}
 	if len(response.Data) == 0 {
-		result.StatusMessage = fmt.Sprintf("已找到版本 %s，但 Apple 尚未暴露 build %d；可能仍在同步", release.Version, release.Build)
+		if info.BuildUploadState == "COMPLETE" {
+			result.Status = "processing"
+			result.StatusMessage = fmt.Sprintf("Apple Build Upload 已完成；等待 TestFlight build %d 可见", release.Build)
+		} else {
+			result.StatusMessage = fmt.Sprintf("已找到版本 %s，但 Apple 尚未暴露 build %d；可能仍在同步", release.Version, release.Build)
+		}
+		result.Info = info
 		return result, nil
 	}
 	if len(response.Data) > 1 {
@@ -625,12 +907,27 @@ func (r *ascResolver) testFlight(ctx context.Context, release Release) (testFlig
 			break
 		}
 	}
+	if buildAttributes.ProcessingState == "VALID" && !buildAttributes.Expired {
+		r.automateTestFlightDistribution(ctx, appID, build.ID, &info)
+	}
+	if info.PublicLink != "" {
+		result.OpenURL = info.PublicLink
+	}
 	result.Status, result.StatusMessage = testFlightState(
 		buildAttributes.ProcessingState,
 		detail.InternalBuildState,
 		detail.ExternalBuildState,
 		buildAttributes.Expired,
 	)
+	if info.BetaGroupAssigned {
+		result.StatusMessage += " · 已加入 TestFlight Group “" + info.TargetGroupName + "”"
+	}
+	if info.BetaReviewState != "" {
+		result.StatusMessage += " · Beta Review " + info.BetaReviewState
+	}
+	if info.AutomationError != "" {
+		result.StatusMessage += " · 自动分发：" + info.AutomationError
+	}
 	result.Info = info
 	return result, nil
 }
@@ -722,6 +1019,16 @@ func (a *App) refreshTestFlightReleases(ctx context.Context, cfg AppStoreConnect
 				Info:          TestFlightReleaseInfo{FallbackURL: testFlightFallbackURL(release), LastCheckedAt: &now, LastError: e.Error()},
 			}
 			if release.TestFlight != nil {
+				lookup.Info.BuildUploadID = release.TestFlight.BuildUploadID
+				lookup.Info.BuildUploadState = release.TestFlight.BuildUploadState
+				lookup.Info.TargetGroupName = release.TestFlight.TargetGroupName
+				lookup.Info.TargetGroupType = release.TestFlight.TargetGroupType
+				lookup.Info.AutoCreateGroup = release.TestFlight.AutoCreateGroup
+				lookup.Info.AutoSubmitBetaReview = release.TestFlight.AutoSubmitBetaReview
+				lookup.Info.BetaGroupID = release.TestFlight.BetaGroupID
+				lookup.Info.BetaGroupAssigned = release.TestFlight.BetaGroupAssigned
+				lookup.Info.BetaReviewState = release.TestFlight.BetaReviewState
+				lookup.Info.AutomationError = release.TestFlight.AutomationError
 				lookup.Info.AppleBuildID = release.TestFlight.AppleBuildID
 				lookup.Info.ProcessingState = release.TestFlight.ProcessingState
 				lookup.Info.InternalBuildState = release.TestFlight.InternalBuildState
@@ -865,7 +1172,13 @@ func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, res
 		StatusMessage: "已提交到 App Store Connect；等待 Apple Processing",
 		OpenURL:       profile.TestFlightURL,
 		BuildJobID:    job.ID,
-		TestFlight:    &TestFlightReleaseInfo{FallbackURL: profile.TestFlightURL},
+		TestFlight: &TestFlightReleaseInfo{
+			FallbackURL:          profile.TestFlightURL,
+			TargetGroupName:      profile.TestFlightGroupName,
+			TargetGroupType:      profile.TestFlightGroupType,
+			AutoCreateGroup:      profile.TestFlightCreateGroup,
+			AutoSubmitBetaReview: profile.TestFlightSubmitBetaReview,
+		},
 	}
 	a.snapshotReleaseIcon(release, "")
 
@@ -892,6 +1205,10 @@ func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, res
 				info = *existing.TestFlight
 			}
 			info.FallbackURL = profile.TestFlightURL
+			info.TargetGroupName = profile.TestFlightGroupName
+			info.TargetGroupType = profile.TestFlightGroupType
+			info.AutoCreateGroup = profile.TestFlightCreateGroup
+			info.AutoSubmitBetaReview = profile.TestFlightSubmitBetaReview
 			existing.TestFlight = &info
 			if info.PublicLink != "" {
 				existing.OpenURL = info.PublicLink

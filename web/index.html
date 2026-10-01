@@ -230,6 +230,15 @@
     <label>发布 Lane<select name="lane"><option value="ios-adhoc">iOS · Ad Hoc / ILS</option><option value="ios-testflight">iOS · TestFlight</option><option value="macos-test">macOS · Test</option><option value="macos-release">macOS · Release / Notarized</option></select></label>
     <label>Apple Team<select id="profile-apple-team" name="apple_team_id"><option value="">自动检测（仅一个 Team 时）</option></select><span id="profile-apple-team-help" class="meta">打开 Profile 时由 ILS 读取这台 Mac 的签名身份。</span></label>
     <label id="profile-testflight-url-field" hidden>TestFlight 链接（可选 fallback）<input name="testflight_url" type="url" placeholder="https://testflight.apple.com/join/..." autocomplete="off"><span class="meta">连接 App Store Connect API 后，ILS 会优先读取 Beta Group 的 public link；这里可保留手工 fallback。</span></label>
+    <div id="profile-testflight-automation" class="testflight-automation" hidden>
+      <div class="form-grid">
+        <label>TestFlight Group<input name="testflight_group_name" maxlength="120" placeholder="例如：Internal Test Group"><span class="meta">Build Upload Complete 并出现正式 Build 后，ILS 可自动把 Build 加入此 Group。</span></label>
+        <label>Group 类型<select name="testflight_group_type"><option value="internal">Internal Testing</option><option value="external">External Testing</option></select></label>
+      </div>
+      <label class="check-row"><input name="testflight_create_group" type="checkbox">Group 不存在时由 ILS 自动创建</label>
+      <label class="check-row"><input name="testflight_submit_beta_review" type="checkbox">External Group 自动提交 Beta App Review</label>
+      <p class="meta">自动提交 Beta Review 仅对 External Group 生效；Apple 仍会验证 Test Information、出口合规等要求，失败原因会同步到 Release 状态，不会改写上传成功历史。</p>
+    </div>
     <label>结果契约<select name="result_contract"><option value="ils-result-v1">ILS Result v1（推荐）</option><option value="">Legacy artifact fields</option></select></label>
     <label>渠道<select name="channel"><option value="dev">dev</option><option value="beta">beta</option><option value="stable">stable</option></select></label>
     <label>发布标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>

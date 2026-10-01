@@ -40,9 +40,13 @@ type ReleaseProfile struct {
 	Variant            string `json:"variant"`
 	Lane               string `json:"lane,omitempty"`
 	ResultContract     string `json:"result_contract,omitempty"`
-	AppleTeamID        string `json:"apple_team_id,omitempty"`
-	TestFlightURL      string `json:"testflight_url,omitempty"`
-	BuildCommand       string `json:"build_command"`
+	AppleTeamID                 string `json:"apple_team_id,omitempty"`
+	TestFlightURL               string `json:"testflight_url,omitempty"`
+	TestFlightGroupName         string `json:"testflight_group_name,omitempty"`
+	TestFlightGroupType         string `json:"testflight_group_type,omitempty"`
+	TestFlightCreateGroup       bool   `json:"testflight_create_group,omitempty"`
+	TestFlightSubmitBetaReview  bool   `json:"testflight_submit_beta_review,omitempty"`
+	BuildCommand                string `json:"build_command"`
 	PackageCommand     string `json:"package_command,omitempty"`
 	Artifact           string `json:"artifact,omitempty"`
 	VersionCommand     string `json:"version_command,omitempty"`
@@ -260,6 +264,8 @@ func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
 	p.ResultContract = strings.TrimSpace(p.ResultContract)
 	p.AppleTeamID = strings.ToUpper(strings.TrimSpace(p.AppleTeamID))
 	p.TestFlightURL = strings.TrimSpace(p.TestFlightURL)
+	p.TestFlightGroupName = strings.TrimSpace(p.TestFlightGroupName)
+	p.TestFlightGroupType = strings.ToLower(strings.TrimSpace(p.TestFlightGroupType))
 	p.BuildCommand = strings.TrimSpace(p.BuildCommand)
 	p.PackageCommand = strings.TrimSpace(p.PackageCommand)
 	p.Artifact = strings.TrimSpace(p.Artifact)
@@ -306,6 +312,28 @@ func normalizeReleaseProfile(p ReleaseProfile) (ReleaseProfile, error) {
 	}
 	if len(p.TestFlightURL) > 2048 {
 		return p, fmt.Errorf("TestFlight 链接过长")
+	}
+	if p.Lane != "ios-testflight" {
+		if p.TestFlightGroupName != "" || p.TestFlightGroupType != "" || p.TestFlightCreateGroup || p.TestFlightSubmitBetaReview {
+			return p, fmt.Errorf("TestFlight Group 自动分发只能配置在 ios-testflight lane")
+		}
+	} else if p.TestFlightGroupName != "" {
+		if len(p.TestFlightGroupName) > 120 {
+			return p, fmt.Errorf("TestFlight Group 名称过长")
+		}
+		if p.TestFlightGroupType == "" {
+			p.TestFlightGroupType = "internal"
+		}
+		if !oneOf(p.TestFlightGroupType, "internal", "external") {
+			return p, fmt.Errorf("TestFlight Group 类型必须是 internal 或 external")
+		}
+		if p.TestFlightSubmitBetaReview && p.TestFlightGroupType != "external" {
+			return p, fmt.Errorf("只有 external TestFlight Group 可以自动提交 Beta App Review")
+		}
+	} else {
+		p.TestFlightGroupType = ""
+		p.TestFlightCreateGroup = false
+		p.TestFlightSubmitBetaReview = false
 	}
 	if p.BuildCommand == "" || len(p.BuildCommand) > 32768 || len(p.PackageCommand) > 32768 {
 		return p, fmt.Errorf("需要有效的构建命令")

@@ -159,7 +159,7 @@ upload
 
 A successful Xcode upload or `ils-result-v1` result with `status=submitted` creates a normal ILS Release metadata record with `delivery=testflight` and initially stops at **submitted to App Store Connect**. ILS does not invent Processing or tester availability.
 
-When App Store Connect API access is configured, ILS polls Apple for the matching Bundle ID / marketing version / build number and synchronizes `processingState`, Build Beta Detail, and an enabled Beta Group public link. Those verified states update both the Release card and its associated Build Job.
+When App Store Connect API access is configured, ILS first matches the app's **Build Upload** by Bundle ID / marketing version / build number. This captures Apple's `AWAITING_UPLOAD / PROCESSING / COMPLETE / FAILED` state even before a normal Build resource exists. Release cards and Build Jobs surface that exact Build Upload state. After `COMPLETE`, ILS continues through Build `processingState`, Build Beta Detail, optional TestFlight Group assignment/Beta Review automation, and an enabled Beta Group public link. Those verified states update both the Release card and its associated Build Job.
 
 Overview, Release History and iOS Release all call the same `release-ui.js` card renderer. TestFlight cards show the same verified lifecycle (`submitted → Apple Processing → available`) and use **在 TestFlight 中打开** instead of IPA install/download. An `ios-testflight` Release Profile may still store an optional `testflight_url` invitation as a fallback when Apple does not expose a public link through the configured account.
 

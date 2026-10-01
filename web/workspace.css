@@ -916,3 +916,29 @@
   }
 }
 
+.testflight-automation {
+  margin: 4px 0 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafb;
+}
+
+#profile-dialog .check-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 8px 0;
+}
+
+#profile-dialog .check-row input {
+  width: auto;
+  margin: 4px 0 0;
+  flex: 0 0 auto;
+}
+
+.testflight-automation[hidden] {
+  display: none;
+}
+

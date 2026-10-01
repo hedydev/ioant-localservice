@@ -120,6 +120,29 @@ func TestNormalizeAppStoreConnectConfig(t *testing.T) {
 	}
 }
 
+func TestBuildUploadState(t *testing.T) {
+	tests := []struct {
+		name       string
+		state      string
+		wantStatus string
+		wantNext   bool
+	}{
+		{"awaiting upload", "AWAITING_UPLOAD", "submitted", false},
+		{"processing", "PROCESSING", "processing", false},
+		{"failed", "FAILED", "unavailable", false},
+		{"complete", "COMPLETE", "processing", true},
+		{"not visible", "", "submitted", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status, _, next := buildUploadState(tc.state)
+			if status != tc.wantStatus || next != tc.wantNext {
+				t.Fatalf("buildUploadState(%q) = %q/%v, want %q/%v", tc.state, status, next, tc.wantStatus, tc.wantNext)
+			}
+		})
+	}
+}
+
 func TestTestFlightState(t *testing.T) {
 	tests := []struct {
 		name       string

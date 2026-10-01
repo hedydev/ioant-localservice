@@ -179,6 +179,8 @@ platform
 - App Icon 扫描支持 Git-tracked `Contents.json` 引用的本地生成/ignored PNG；这是 Sowhat 当前 AppIcon 生成方式。读取范围仍限制在对应 `.appiconset`，并拒绝 traversal/symlink/非 PNG/超大文件。失败的前端 `<img>` 会直接移除，避免破图标记。
 - 本轮没有改变 `build-jobs.js` 的 3 秒任务/日志轮询、用户上滚暂停 follow、手动收起日志等行为。
 - Build Job 日志布局进一步固定为“任务详情 → 查看/收起日志 → 此任务日志面板”；按钮和日志都位于对应任务卡内部，不允许出现列表底部的共享日志区域。
+- App Store Connect 同步新增 **Build Upload** 层：按 Bundle ID / marketing version / build number 查询 `buildUploads`，ILS 主状态徽标直接显示 `Build Upload Processing / Complete / Failed`；`COMPLETE` 后才继续解析 Build/Beta Detail。
+- TestFlight Release Profile 可配置目标 Group、Internal/External、自动创建 Group、以及显式的 External Beta Review 自动提交。Group 自动化只在正式 Build `processingState=VALID` 后执行；自动化错误独立记录，不会覆盖上传成功历史。
 
 ## 2. 当前产品语义必须保持
 

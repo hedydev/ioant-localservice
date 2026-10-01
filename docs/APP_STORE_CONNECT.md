@@ -40,23 +40,28 @@ For each recent TestFlight Release with a Bundle ID, ILS resolves:
 ```text
 Bundle ID
 -> App Store Connect App
+-> Build Upload (marketing version + build number)
+-> Build Upload.state
 -> iOS prerelease marketing version
--> build number
+-> Build
 -> Build.processingState
 -> Build Beta Detail
--> Beta Groups / public link
+-> Beta Group / public link
+-> optional Group assignment / Beta App Review automation
 ```
+
+The Build Upload layer is authoritative during Apple's early import phase. Apple exposes `AWAITING_UPLOAD`, `PROCESSING`, `FAILED`, and `COMPLETE`; a normal Build resource may not exist yet while Build Upload is still Processing. ILS therefore mirrors Build Upload first instead of leaving a real Apple Processing upload at `submitted`.
 
 ILS maps the evidence into the common Release status:
 
 | ILS status | Meaning |
 | --- | --- |
-| `submitted` | Upload was accepted, but Apple has not exposed a matching build record yet |
-| `processing` | Apple is processing the binary or the beta state is still waiting on compliance/review/readiness |
+| `submitted` | Upload was accepted; Build Upload is not visible yet or is still awaiting the upload |
+| `processing` | Build Upload is Processing/Complete-but-waiting-for-Build, or the processed Build is waiting on compliance/review/readiness |
 | `available` | Internal or external Build Beta Detail reports a beta-testing-ready/testing state |
 | `unavailable` | Apple reports invalid/failed processing, expiration, processing exception, or beta rejection |
 
-The raw Apple fields are also retained under the Release's `testflight` metadata for diagnosis.
+The raw Apple fields are also retained under the Release's `testflight` metadata for diagnosis, including `build_upload_state`, Build `processing_state`, internal/external beta states, resolved Group information, and Beta Review state. The Release/Build Job badge surfaces Build Upload `PROCESSING / COMPLETE / FAILED` directly so it can be compared with App Store Connect's **Build Uploads** table.
 
 ## TestFlight link
 
@@ -105,3 +110,17 @@ This lets a standard project release script use the same ILS-managed Team key fo
 - Builds: https://developer.apple.com/documentation/appstoreconnectapi/builds
 - Build Beta Detail: https://developer.apple.com/documentation/appstoreconnectapi/buildbetadetail
 - Beta Groups: https://developer.apple.com/documentation/appstoreconnectapi/betagroup
+
+
+## TestFlight Group automation
+
+An `ios-testflight` Release Profile may optionally define a target TestFlight Group:
+
+- `testflight_group_name`;
+- `testflight_group_type=internal|external`;
+- `testflight_create_group=true` to create the named group when it does not exist;
+- `testflight_submit_beta_review=true` for an **external** group when ILS should explicitly submit the processed Build for Beta App Review.
+
+Automation starts only after Build Upload is `COMPLETE` and Apple exposes a normal Build with `processingState=VALID`. ILS never treats a successful upload as proof that the build is testable.
+
+For an internal group, ILS can create/find the group and add the Build. For an external group, ILS can add the Build and, when explicitly enabled, create the Beta App Review submission. Apple may reject that submission when required TestFlight information, export-compliance declarations, or other review prerequisites are missing. Such an automation error is stored on the Release and shown in the UI; it does not rewrite the original upload as failed.

@@ -95,6 +95,54 @@ func TestNormalizeReleaseProfileTestFlightLink(t *testing.T) {
 }
 
 
+func TestNormalizeReleaseProfileTestFlightAutomation(t *testing.T) {
+	base := ReleaseProfile{
+		ID:             "ios-testflight",
+		Name:           "iOS TestFlight",
+		Platform:       "ios",
+		Architecture:   "arm64",
+		Channel:        "beta",
+		Variant:        "default",
+		Lane:           "ios-testflight",
+		ResultContract: "ils-result-v1",
+		BuildCommand:   "true",
+	}
+
+	internal := base
+	internal.TestFlightGroupName = "Internal Test Group"
+	internal.TestFlightCreateGroup = true
+	got, err := normalizeReleaseProfile(internal)
+	if err != nil {
+		t.Fatalf("normalize internal automation: %v", err)
+	}
+	if got.TestFlightGroupType != "internal" || !got.TestFlightCreateGroup {
+		t.Fatalf("internal automation normalized incorrectly: %#v", got)
+	}
+
+	external := base
+	external.TestFlightGroupName = "External Testers"
+	external.TestFlightGroupType = "external"
+	external.TestFlightSubmitBetaReview = true
+	if _, err := normalizeReleaseProfile(external); err != nil {
+		t.Fatalf("normalize external automation: %v", err)
+	}
+
+	badInternalReview := base
+	badInternalReview.TestFlightGroupName = "Internal Test Group"
+	badInternalReview.TestFlightGroupType = "internal"
+	badInternalReview.TestFlightSubmitBetaReview = true
+	if _, err := normalizeReleaseProfile(badInternalReview); err == nil {
+		t.Fatal("expected internal auto beta review to fail")
+	}
+
+	wrongLane := base
+	wrongLane.Lane = "ios-adhoc"
+	wrongLane.TestFlightGroupName = "Internal Test Group"
+	if _, err := normalizeReleaseProfile(wrongLane); err == nil {
+		t.Fatal("expected TestFlight Group config on non-TestFlight lane to fail")
+	}
+}
+
 func TestValidateContractResultTestFlightRequiresBundleID(t *testing.T) {
 	profile := ReleaseProfile{
 		ID:             "ios-testflight",
