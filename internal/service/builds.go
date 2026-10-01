@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -572,13 +573,18 @@ var buildEventStages = map[string]bool{
 var buildEventStates = map[string]bool{
 	"queued": true, "started": true, "running": true, "succeeded": true, "failed": true,
 }
+var xcodeProgressStages = map[string]bool{
+	"build": true, "archive": true, "export": true, "upload": true, "notarize": true,
+}
+var xcodeProgressRE = regexp.MustCompile("Progress ([0-9]{1,3})%:\\s*(.*)$")
 
 type eventLog struct {
-	dst     io.Writer
-	mu      sync.Mutex
-	pending string
-	secret  string
-	onEvent func(BuildEvent)
+	dst          io.Writer
+	mu           sync.Mutex
+	pending      string
+	secret       string
+	currentStage string
+	onEvent      func(BuildEvent)
 }
 
 func (l *eventLog) Write(p []byte) (int, error) {
@@ -598,26 +604,47 @@ func (l *eventLog) Write(p []byte) (int, error) {
 		}
 		line := strings.TrimSpace(l.pending[:i])
 		l.pending = l.pending[i+1:]
-		if !strings.HasPrefix(line, "ILS_EVENT ") {
+		if strings.HasPrefix(line, "ILS_EVENT ") {
+			raw := strings.TrimSpace(strings.TrimPrefix(line, "ILS_EVENT "))
+			if len(raw) == 0 || len(raw) > 16<<10 {
+				continue
+			}
+			var ev BuildEvent
+			dec := json.NewDecoder(strings.NewReader(raw))
+			dec.DisallowUnknownFields()
+			if dec.Decode(&ev) != nil || !buildEventStages[ev.Stage] || !buildEventStates[ev.State] {
+				continue
+			}
+			if ev.Progress != nil && (*ev.Progress < 0 || *ev.Progress > 100) {
+				continue
+			}
+			ev.Message = strings.ReplaceAll(ev.Message, l.secret, "[REDACTED]")
+			if len(ev.Message) > 1000 {
+				ev.Message = ev.Message[:1000]
+			}
+			l.currentStage = ev.Stage
+			if l.onEvent != nil {
+				l.onEvent(ev)
+			}
 			continue
 		}
-		raw := strings.TrimSpace(strings.TrimPrefix(line, "ILS_EVENT "))
-		if len(raw) == 0 || len(raw) > 16<<10 {
+
+		if !xcodeProgressStages[l.currentStage] {
 			continue
 		}
-		var ev BuildEvent
-		dec := json.NewDecoder(strings.NewReader(raw))
-		dec.DisallowUnknownFields()
-		if dec.Decode(&ev) != nil || !buildEventStages[ev.Stage] || !buildEventStates[ev.State] {
+		match := xcodeProgressRE.FindStringSubmatch(line)
+		if len(match) != 3 {
 			continue
 		}
-		if ev.Progress != nil && (*ev.Progress < 0 || *ev.Progress > 100) {
+		progress, e := strconv.Atoi(match[1])
+		if e != nil || progress < 0 || progress > 100 {
 			continue
 		}
-		ev.Message = strings.ReplaceAll(ev.Message, l.secret, "[REDACTED]")
-		if len(ev.Message) > 1000 {
-			ev.Message = ev.Message[:1000]
+		message := strings.ReplaceAll(strings.TrimSpace(match[2]), l.secret, "[REDACTED]")
+		if len(message) > 1000 {
+			message = message[:1000]
 		}
+		ev := BuildEvent{Stage: l.currentStage, State: "running", Progress: &progress, Message: message}
 		if l.onEvent != nil {
 			l.onEvent(ev)
 		}

@@ -81,7 +81,9 @@ Shared action helpers may be imported when they represent a real reusable operat
 - first open scrolls to the newest output;
 - while the user remains near the bottom, new output auto-follows;
 - scrolling upward pauses following;
-- returning near the bottom resumes following.
+- returning near the bottom resumes following;
+- standard `ILS_EVENT` progress remains authoritative;
+- while an Xcode build/archive/export/upload/notarize stage is active, native `Progress N%: message` output is parsed as real task progress and shown in the build card instead of a fabricated percentage.
 
 Do not implement separate log polling in Release Profile or source modules.
 
