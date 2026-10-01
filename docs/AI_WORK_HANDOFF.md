@@ -176,6 +176,7 @@ platform
 - App Store Connect 管理区显示 Team / Individual Key、连接状态、最近检查、TestFlight 上传认证路径；保存且验证成功后立即同步一次 Release 状态，页面可见时每 10 秒只回读本地配置状态。
 - TestFlight Apple Public Link 与 Release Profile fallback 现在分开保存。Apple 关闭 Public Link 后，下一次成功同步会清除陈旧 public link 并回退到 Profile URL。
 - App Icon 使用统一 identity shell，并叠加平台徽标；真实 artwork 缺失或加载失败时保留平台 glyph fallback，不再留下空白图标位。
+- App Icon 扫描支持 Git-tracked `Contents.json` 引用的本地生成/ignored PNG；这是 Sowhat 当前 AppIcon 生成方式。读取范围仍限制在对应 `.appiconset`，并拒绝 traversal/symlink/非 PNG/超大文件。失败的前端 `<img>` 会直接移除，避免破图标记。
 - 本轮没有改变 `build-jobs.js` 的 3 秒任务/日志轮询、用户上滚暂停 follow、手动收起日志等行为。
 - Build Job 日志布局进一步固定为“任务详情 → 查看/收起日志 → 此任务日志面板”；按钮和日志都位于对应任务卡内部，不允许出现列表底部的共享日志区域。
 

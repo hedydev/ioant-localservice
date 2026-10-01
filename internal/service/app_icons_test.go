@@ -1,6 +1,11 @@
 package service
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
 
 func TestAssetImagePlatformAndPixels(t *testing.T) {
 	cases := []struct {
@@ -30,5 +35,59 @@ func TestPNGBytes(t *testing.T) {
 	}
 	if pngBytes([]byte("not png")) {
 		t.Fatal("unexpected PNG signature match")
+	}
+}
+
+
+func TestRefreshProjectIconsReadsGeneratedCatalogPNG(t *testing.T) {
+	root := t.TempDir()
+	setDir := filepath.Join(root, "App", "Assets.xcassets", "AppIcon.appiconset")
+	if err := os.MkdirAll(setDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	contents := []byte(`{"images":[{"filename":"AppIcon-1024.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}`)
+	contentsPath := filepath.Join(setDir, "Contents.json")
+	if err := os.WriteFile(contentsPath, contents, 0644); err != nil {
+		t.Fatal(err)
+	}
+	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00}
+	if err := os.WriteFile(filepath.Join(setDir, "AppIcon-1024.png"), png, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"add", filepath.ToSlash(filepath.Join("App", "Assets.xcassets", "AppIcon.appiconset", "Contents.json"))},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	a := &App{data: t.TempDir()}
+	a.refreshProjectIcons("demo", root)
+	got, err := os.ReadFile(a.projectIconPath("demo", "ios"))
+	if err != nil {
+		t.Fatalf("project icon was not cached: %v", err)
+	}
+	if !pngBytes(got) {
+		t.Fatal("cached project icon is not PNG")
+	}
+}
+
+func TestReadCatalogPNGRejectsTraversal(t *testing.T) {
+	root := t.TempDir()
+	setDir := filepath.Join(root, "Assets.xcassets", "AppIcon.appiconset")
+	if err := os.MkdirAll(setDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00}
+	if err := os.WriteFile(filepath.Join(root, "outside.png"), png, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCatalogPNG(root, filepath.ToSlash(filepath.Join("Assets.xcassets", "AppIcon.appiconset")), "../outside.png"); err == nil {
+		t.Fatal("expected traversal filename to be rejected")
 	}
 }

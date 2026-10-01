@@ -167,11 +167,11 @@ Overview, Release History and iOS Release all call the same `release-ui.js` card
 
 App Icon artwork is separate from the Mac/iPhone/iPad platform-outline glyphs.
 
-ILS keeps a platform-specific project icon cache. When a linked Git source is inspected or pulled, ILS scans tracked `*.appiconset/Contents.json` catalogs and caches the best iOS and macOS PNG independently. It does not hard-code a product name or image path. Release Profiles use the current project cache; each new Build Job snapshots the platform icon into its own job directory so later source icon changes do not rewrite that task's presentation.
+ILS keeps a platform-specific project icon cache. When a linked Git source is inspected or pulled, ILS scans tracked `*.appiconset/Contents.json` catalogs and caches the best iOS and macOS PNG independently. The catalog metadata must be Git-tracked, but a PNG explicitly referenced by that trusted catalog may be a locally generated/ignored file; ILS reads it only from the same `.appiconset` directory after rejecting absolute paths, directory traversal, symlinks, non-PNG files and oversized files. It does not hard-code a product name or image path. Release Profiles use the current project cache; each new Build Job snapshots the platform icon into its own job directory so later source icon changes do not rewrite that task's presentation.
 
 For published iOS IPA files, ILS additionally extracts the largest usable compiled main-app App Icon PNG when available. Every new Release snapshots an icon into release-specific storage. TestFlight releases and macOS/fallback releases use the current platform-specific project cache when no artifact icon can be extracted. Existing releases are backfilled lazily from their retained artifact/cache when possible. Release History and the iOS release list use the release snapshot.
 
-The UI wraps artwork in a shared App Icon shell with a small platform badge. If the artwork endpoint is missing or fails to load, the shell remains visible and falls back to the Mac/iPhone/iPad glyphs instead of leaving an empty identity slot.
+The UI wraps artwork in a shared App Icon shell with a small platform badge. If the artwork endpoint is missing or fails to load, the failed `<img>` node is removed and the shell falls back to the Mac/iPhone/iPad glyphs instead of rendering a broken-image marker or leaving an empty identity slot.
 
 ## App Store Connect module boundary
 

@@ -112,7 +112,7 @@ export function initPlatformUI(){
  decoratePlatformIcons();
  document.addEventListener('error',event=>{
   const image=event.target;
-  if(image?.matches?.('img[data-app-icon]'))image.hidden=true;
+  if(image?.matches?.('img[data-app-icon]'))image.remove();
  },true);
  window.addEventListener('admin-loaded',()=>decoratePlatformIcons());
  window.addEventListener('data-refreshed',()=>decoratePlatformIcons());

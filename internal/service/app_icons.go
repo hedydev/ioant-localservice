@@ -25,8 +25,9 @@ type assetCatalogImage struct {
 }
 
 type projectIconCandidate struct {
-	Path  string
-	Score int64
+	SetDir   string
+	Filename string
+	Score    int64
 }
 
 func appIconPixels(size, scale string) int64 {
@@ -65,6 +66,27 @@ func pngBytes(raw []byte) bool {
 	return len(raw) >= 8 &&
 		raw[0] == 0x89 && raw[1] == 'P' && raw[2] == 'N' && raw[3] == 'G' &&
 		raw[4] == 0x0d && raw[5] == 0x0a && raw[6] == 0x1a && raw[7] == 0x0a
+}
+
+func readCatalogPNG(root, setDir, filename string) ([]byte, error) {
+	name := filepath.FromSlash(strings.TrimSpace(filename))
+	if name == "" || filepath.IsAbs(name) || filepath.Base(name) != name || strings.ToLower(filepath.Ext(name)) != ".png" {
+		return nil, os.ErrInvalid
+	}
+	full := filepath.Join(root, filepath.FromSlash(setDir), name)
+	real, e := filepath.EvalSymlinks(full)
+	if e != nil || real != full {
+		return nil, os.ErrInvalid
+	}
+	info, e := os.Stat(full)
+	if e != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxAppIconBytes {
+		return nil, os.ErrInvalid
+	}
+	raw, e := os.ReadFile(full)
+	if e != nil || int64(len(raw)) > maxAppIconBytes || !pngBytes(raw) {
+		return nil, os.ErrInvalid
+	}
+	return raw, nil
 }
 
 func writeBinaryAtomic(path string, raw []byte) error {
@@ -144,8 +166,11 @@ func (a *App) refreshProjectIcons(project, root string) {
 			if preferredSet {
 				score += 1 << 50
 			}
-			candidatePath := filepath.ToSlash(filepath.Join(setDir, image.Filename))
-			candidates[platform] = append(candidates[platform], projectIconCandidate{Path: candidatePath, Score: score})
+			candidates[platform] = append(candidates[platform], projectIconCandidate{
+				SetDir:   filepath.ToSlash(setDir),
+				Filename: image.Filename,
+				Score:    score,
+			})
 		}
 	}
 	for _, platform := range []string{"ios", "macos"} {
@@ -153,8 +178,8 @@ func (a *App) refreshProjectIcons(project, root string) {
 		sort.SliceStable(items, func(i, j int) bool { return items[i].Score > items[j].Score })
 		var selected []byte
 		for _, candidate := range items {
-			raw, e := safeTracked(root, candidate.Path, maxAppIconBytes)
-			if e == nil && pngBytes(raw) {
+			raw, e := readCatalogPNG(root, candidate.SetDir, candidate.Filename)
+			if e == nil {
 				selected = raw
 				break
 			}
