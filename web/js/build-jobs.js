@@ -30,9 +30,12 @@ function stageLabel(job){
 }
 
 function progressView(job){
- if(job.status!=='running'||!Number.isFinite(job.progress))return '';
- const value=Math.max(0,Math.min(100,job.progress));
- return '<div class="job-progress"><progress max="100" value="'+value+'"></progress><span>'+value+'%</span></div>';
+ if(job.status!=='running')return '';
+ if(Number.isFinite(job.progress)){
+  const value=Math.max(0,Math.min(100,job.progress));
+  return '<div class="job-progress"><progress max="100" value="'+value+'"></progress><span>'+value+'%</span></div>';
+ }
+ return '<div class="job-progress indeterminate"><progress max="100" aria-label="'+escapeHTML(stageLabel(job))+'"></progress><span>'+escapeHTML(stageLabel(job))+'</span></div>';
 }
 
 function resultView(job){

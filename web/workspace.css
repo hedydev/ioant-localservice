@@ -436,3 +436,12 @@
 .release-title .badge {
   width: fit-content;
 }
+
+.job-progress.indeterminate span {
+  min-width: auto;
+  white-space: nowrap;
+}
+
+.job-progress.indeterminate progress {
+  accent-color: currentColor;
+}
