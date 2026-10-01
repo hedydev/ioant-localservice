@@ -173,6 +173,12 @@ func (a *App) authorized(w http.ResponseWriter, r *http.Request) bool {
 }
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/admin/session", func(w http.ResponseWriter, r *http.Request) {
+		if !a.authorized(w, r) {
+			return
+		}
+		respond(w, http.StatusOK, map[string]any{"authenticated": true, "role": "admin"})
+	})
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, map[string]any{"status": "ok", "ota_configured": a.publicURL != "", "max_upload_bytes": maxUpload})
 	})

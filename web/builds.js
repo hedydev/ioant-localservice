@@ -29,6 +29,7 @@ function profileSummary(p){
  return `${p.platform==='ios'?'iOS':'macOS'} · ${escape(p.architecture)} · ${escape(p.channel)} · ${escape(p.variant)}<br>${escape(metadata)}<br>${escape(output)}`;
 }
 function renderBuildDefinitions(){
+ if(!state.admin)return;
  const source=buildSourceState;
  const blocked=!source||source.configured===false||source.blocker;
  $('#new-release-profile').disabled=!source||source.configured===false;
@@ -41,13 +42,13 @@ function renderBuildDefinitions(){
    :'<p class="meta">项目中没有 release*.sh。可以直接使用上面的 ILS Release Profile，无需给业务仓库添加发布脚本。</p>');
 }
 async function loadReleaseProfiles(){
- if(!state.project||!state.token){releaseProfiles=[];renderBuildDefinitions();return;}
+ if(!state.project||!state.admin){releaseProfiles=[];renderBuildDefinitions();return;}
  const id=state.project;
  try{const profiles=await api(`/api/projects/${id}/release-profiles`);if(state.project!==id)return;releaseProfiles=profiles;renderBuildDefinitions();}
  catch(e){if(state.project===id)notice(e.message);}
 }
 async function loadBuildSource(){
- if(!state.project||!state.token)return;
+ if(!state.project||!state.admin)return;
  const id=state.project;$('#source-info').textContent='正在读取 Git、ILS Profiles 与项目发布脚本…';
  try{
   const source=await api(`/api/projects/${id}/build-source`);
@@ -63,7 +64,7 @@ async function loadBuildSource(){
  }catch(e){if(state.project===id){buildSourceState=null;$('#source-info').textContent=e.message;renderBuildDefinitions();}}
 }
 async function loadBuildJobs(){
- if(!state.project||!state.token||buildLoading)return;buildLoading=true;
+ if(!state.project||!state.admin||buildLoading)return;buildLoading=true;
  const id=state.project;
  try{
   const jobs=await api(`/api/projects/${id}/builds`);if(state.project!==id)return;
@@ -166,8 +167,9 @@ $('#build-scripts').onclick=e=>{const b=e.target.closest('[data-run-script]');if
 $('#build-jobs').onclick=e=>{const b=e.target.closest('[data-build-log]');if(b){activeLog=b.dataset.buildLog;loadBuildJobs();}};
 function clearBuildPanel(){buildProject=null;activeLog=null;buildSourceState=null;releaseProfiles=[];$('#release-profiles').innerHTML='';$('#build-scripts').innerHTML='';$('#build-jobs').innerHTML='';$('#build-log').hidden=true;$('#source-form').reset();$('#source-info').textContent='关联已有 Git 项目后，可直接在 ILS 创建 Release Profile；项目内 release*.sh 仅作为兼容方式。';renderBuildDefinitions();loadBuildSource();loadBuildJobs();}
 window.addEventListener('project-changed',clearBuildPanel);
+window.addEventListener('admin-cleared',()=>{clearBuildPanel();$('#build-log').textContent='';$('#profile-form').reset();});
 window.addEventListener('admin-loaded',()=>{loadBuildSource();loadBuildJobs();});
-setInterval(()=>{if(!document.hidden&&state.token)loadBuildJobs();},3000);
+setInterval(()=>{if(!document.hidden&&state.admin)loadBuildJobs();},3000);
 $('#choose-project-folder').onclick=async()=>{
  if(!needAdmin())return;
  const button=$('#choose-project-folder');const project=state.project;
