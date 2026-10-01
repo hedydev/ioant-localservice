@@ -16,6 +16,20 @@ function releaseMarkdown(markdown) {
  return out+(list?'</ul>':'')+(code?'</code></pre>':'');
 }
 let buildProject=null, activeLog=null, buildLoading=false, buildSourceState=null, releaseProfiles=[];
+let followBuildLog=true;
+
+function updateBuildLog(text){
+ const el=$('#build-log');
+ const firstOpen=el.hidden;
+ const distanceFromBottom=el.scrollHeight-el.scrollTop-el.clientHeight;
+ const wasFollowing=firstOpen||followBuildLog||distanceFromBottom<64;
+ el.textContent=text;
+ el.hidden=false;
+ if(wasFollowing){
+  el.scrollTop=el.scrollHeight;
+  followBuildLog=true;
+ }
+}
 
 function profileSummary(p){
  const standard=p.result_contract==='ils-result-v1';
@@ -94,7 +108,7 @@ async function loadBuildJobs(){
    return `<div class="meta">结果：${escape(r.lane||'artifact')} · ${escape(r.version||'')} (${escape(r.build||'')})</div>`;
   };
   $('#build-jobs').innerHTML=jobs.length?'<h3>构建记录</h3>'+jobs.map(j=>`<article class="build-job"><div class="build-job-main"><div><strong>${escape(j.title||j.profile_id||j.script||'ILS Build')}</strong> <span class="badge">${escape(statusLabel(j))}</span></div><div class="meta">${escape(j.mode==='profile'?'ILS Profile':'Project Script')} · ${date(j.created_at)} · ${escape((j.commit||'').slice(0,12))}</div>${j.message?`<div class="job-message">${escape(j.message)}</div>`:''}${progressView(j)}${j.error?`<p>${escape(j.error)}</p>`:''}${resultView(j)}${j.release_ids.length?`<div class="meta">关联安装包：${j.release_ids.length} 个</div>`:''}${j.release_ids.map(r=>`<a class="build-artifact" href="/api/releases/${escape(r)}/download">下载 ${escape(r.slice(0,8))}</a>`).join(' ')}</div><button data-build-log="${escape(j.id)}">查看日志</button></article>`).join(''):'';
-  if(activeLog){const data=await api(`/api/builds/${activeLog}/log`);if(state.project!==id)return;$('#build-log').textContent=data.log;$('#build-log').hidden=false;}
+  if(activeLog){const data=await api(`/api/builds/${activeLog}/log`);if(state.project!==id)return;updateBuildLog(data.log);}
  }catch(e){if(state.project===id)$('#source-info').textContent=e.message;}finally{buildLoading=false;}
 }
 function syncProfileForm(){
@@ -164,8 +178,8 @@ $('#delete-profile').onclick=async()=>{
  catch(e){form.querySelector('.form-error').textContent=e.message;}
 };
 $('#build-scripts').onclick=e=>{const b=e.target.closest('[data-run-script]');if(b)startBuild({script:b.dataset.runScript},b);};
-$('#build-jobs').onclick=e=>{const b=e.target.closest('[data-build-log]');if(b){activeLog=b.dataset.buildLog;loadBuildJobs();}};
-function clearBuildPanel(){buildProject=null;activeLog=null;buildSourceState=null;releaseProfiles=[];$('#release-profiles').innerHTML='';$('#build-scripts').innerHTML='';$('#build-jobs').innerHTML='';$('#build-log').hidden=true;$('#source-form').reset();$('#source-info').textContent='关联已有 Git 项目后，可直接在 ILS 创建 Release Profile；项目内 release*.sh 仅作为兼容方式。';renderBuildDefinitions();loadBuildSource();loadBuildJobs();}
+$('#build-jobs').onclick=e=>{const b=e.target.closest('[data-build-log]');if(b){activeLog=b.dataset.buildLog;followBuildLog=true;$('#build-log').hidden=true;loadBuildJobs();}};
+function clearBuildPanel(){buildProject=null;activeLog=null;followBuildLog=true;buildSourceState=null;releaseProfiles=[];$('#release-profiles').innerHTML='';$('#build-scripts').innerHTML='';$('#build-jobs').innerHTML='';$('#build-log').hidden=true;$('#source-form').reset();$('#source-info').textContent='关联已有 Git 项目后，可直接在 ILS 创建 Release Profile；项目内 release*.sh 仅作为兼容方式。';renderBuildDefinitions();loadBuildSource();loadBuildJobs();}
 window.addEventListener('project-changed',clearBuildPanel);
 window.addEventListener('admin-cleared',()=>{clearBuildPanel();$('#build-log').textContent='';$('#profile-form').reset();});
 window.addEventListener('admin-loaded',()=>{loadBuildSource();loadBuildJobs();});
@@ -185,3 +199,8 @@ $('#choose-project-folder').onclick=async()=>{
  }catch(e){if(state.project===project)$('#source-info').textContent=e.message;}
  finally{button.disabled=false;button.textContent='选择文件夹…';}
 };
+
+$('#build-log').addEventListener('scroll',()=>{
+ const el=$('#build-log');
+ followBuildLog=(el.scrollHeight-el.scrollTop-el.clientHeight)<64;
+});
