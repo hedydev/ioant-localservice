@@ -32,24 +32,30 @@ type Project struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 type Release struct {
-	Variant      string    `json:"variant"`
-	ID           string    `json:"id"`
-	ProjectID    string    `json:"project_id"`
-	Version      string    `json:"version"`
-	Build        int64     `json:"build"`
-	Platform     string    `json:"platform"`
-	Architecture string    `json:"architecture"`
-	Channel      string    `json:"channel"`
-	Notes        string    `json:"notes"`
-	Filename     string    `json:"filename"`
-	Size         int64     `json:"size"`
-	SHA256       string    `json:"sha256"`
-	CreatedAt    time.Time `json:"created_at"`
-	BundleID     string    `json:"bundle_id,omitempty"`
-	IOS          *IOSInfo  `json:"ios,omitempty"`
-	DownloadURL  string    `json:"download_url"`
-	InstallURL   string    `json:"install_url,omitempty"`
-	AppIconURL   string    `json:"app_icon_url,omitempty"`
+	Variant       string                 `json:"variant"`
+	ID            string                 `json:"id"`
+	ProjectID     string                 `json:"project_id"`
+	Version       string                 `json:"version"`
+	Build         int64                  `json:"build"`
+	Platform      string                 `json:"platform"`
+	Architecture  string                 `json:"architecture"`
+	Channel       string                 `json:"channel"`
+	Notes         string                 `json:"notes"`
+	Filename      string                 `json:"filename,omitempty"`
+	Size          int64                  `json:"size,omitempty"`
+	SHA256        string                 `json:"sha256,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	BundleID      string                 `json:"bundle_id,omitempty"`
+	IOS           *IOSInfo               `json:"ios,omitempty"`
+	Delivery      string                 `json:"delivery,omitempty"`
+	Status        string                 `json:"status,omitempty"`
+	StatusMessage string                 `json:"status_message,omitempty"`
+	OpenURL       string                 `json:"open_url,omitempty"`
+	BuildJobID    string                 `json:"build_job_id,omitempty"`
+	TestFlight    *TestFlightReleaseInfo `json:"testflight,omitempty"`
+	DownloadURL   string                 `json:"download_url,omitempty"`
+	InstallURL    string                 `json:"install_url,omitempty"`
+	AppIconURL    string                 `json:"app_icon_url,omitempty"`
 }
 type state struct {
 	Projects []Project `json:"projects"`
@@ -57,6 +63,12 @@ type state struct {
 }
 type App struct {
 	folderPickerMu sync.Mutex
+	ascMu          sync.Mutex
+	ascRefreshing  bool
+	ascConnected   bool
+	ascLastRefresh time.Time
+	ascLastCheckAt *time.Time
+	ascLastError   string
 	buildMu        sync.Mutex
 	activeBuild    string
 	cancelBuild    context.CancelFunc
@@ -118,6 +130,12 @@ func New(data, publicURL string, static fs.FS) (*App, error) {
 	for i := range a.state.Releases {
 		if a.state.Releases[i].Variant == "" {
 			a.state.Releases[i].Variant = "default"
+		}
+		if a.state.Releases[i].Delivery == "" {
+			a.state.Releases[i].Delivery = "artifact"
+		}
+		if a.state.Releases[i].Status == "" {
+			a.state.Releases[i].Status = "published"
 		}
 	}
 	// Remove only unfinished upload files from a previous interrupted run.
@@ -205,6 +223,12 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects/{project}/build-source", a.buildSource)
 	mux.HandleFunc("POST /api/local/select-folder", a.selectFolder)
 	mux.HandleFunc("GET /api/local/apple-signing-teams", a.appleSigningTeams)
+	mux.HandleFunc("POST /api/local/select-app-store-connect-key", a.selectAppStoreConnectKey)
+	mux.HandleFunc("GET /api/app-store-connect/config", a.appStoreConnectConfig)
+	mux.HandleFunc("POST /api/app-store-connect/config", a.appStoreConnectConfig)
+	mux.HandleFunc("DELETE /api/app-store-connect/config", a.appStoreConnectConfig)
+	mux.HandleFunc("POST /api/app-store-connect/check", a.appStoreConnectCheck)
+	mux.HandleFunc("POST /api/app-store-connect/refresh", a.appStoreConnectRefresh)
 	mux.HandleFunc("POST /api/projects/{project}/build-source", a.buildSource)
 	mux.HandleFunc("GET /api/projects/{project}/release-profiles", a.releaseProfiles)
 	mux.HandleFunc("POST /api/projects/{project}/release-profiles", a.releaseProfiles)
@@ -270,14 +294,26 @@ func (a *App) projectExists(id string) bool {
 	return false
 }
 func (a *App) decorated(v Release) Release {
-	v.DownloadURL = "/api/releases/" + v.ID + "/download"
+	if v.Delivery == "" {
+		v.Delivery = "artifact"
+	}
+	if v.Status == "" {
+		v.Status = "published"
+	}
+	if v.Delivery == "artifact" {
+		v.DownloadURL = "/api/releases/" + v.ID + "/download"
+	}
 	if _, e := os.Stat(a.releaseIconPath(v.ID)); os.IsNotExist(e) {
-		a.snapshotReleaseIcon(v, filepath.Join(a.data, "artifacts", v.ID))
+		artifact := ""
+		if v.Delivery == "artifact" {
+			artifact = filepath.Join(a.data, "artifacts", v.ID)
+		}
+		a.snapshotReleaseIcon(v, artifact)
 	}
 	if _, e := os.Stat(a.releaseIconPath(v.ID)); e == nil {
 		v.AppIconURL = "/api/releases/" + v.ID + "/icon"
 	}
-	if a.publicURL != "" && v.IOS != nil && v.IOS.OTAEligible() {
+	if v.Delivery == "artifact" && a.publicURL != "" && v.IOS != nil && v.IOS.OTAEligible() {
 		v.InstallURL = "itms-services://?action=download-manifest&url=" + url.QueryEscape(a.publicURL+"/api/releases/"+v.ID+"/manifest.plist")
 	}
 	return v
@@ -299,6 +335,7 @@ func (a *App) releases(id string) []Release {
 	return out
 }
 func (a *App) listReleases(w http.ResponseWriter, r *http.Request) {
+	a.scheduleTestFlightRefresh()
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	id := r.PathValue("project")
@@ -388,7 +425,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	build, e := parseBuild(fields["build"])
-	v := Release{ID: randomID(16), ProjectID: id, Version: fields["version"], Build: build, Platform: fields["platform"], Architecture: fields["architecture"], Channel: fields["channel"], Notes: fields["notes"], Filename: filename, Size: size, SHA256: digest, CreatedAt: time.Now().UTC(), BundleID: fields["bundle_id"]}
+	v := Release{ID: randomID(16), ProjectID: id, Version: fields["version"], Build: build, Platform: fields["platform"], Architecture: fields["architecture"], Channel: fields["channel"], Notes: fields["notes"], Filename: filename, Size: size, SHA256: digest, CreatedAt: time.Now().UTC(), BundleID: fields["bundle_id"], Delivery: "artifact", Status: "published"}
 	v.Variant = fields["variant"]
 	if v.Variant == "" {
 		v.Variant = "default"
@@ -440,7 +477,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, x := range a.state.Releases {
-		if x.Variant == v.Variant && x.ProjectID == id && x.Version == v.Version && x.Build == v.Build && x.Platform == v.Platform && x.Channel == v.Channel && x.Architecture == v.Architecture {
+		if x.Variant == v.Variant && x.ProjectID == id && x.Version == v.Version && x.Build == v.Build && x.Platform == v.Platform && x.Channel == v.Channel && x.Architecture == v.Architecture && (x.Delivery == "" || x.Delivery == "artifact") {
 			if x.SHA256 == v.SHA256 {
 				if _, iconErr := os.Stat(a.releaseIconPath(x.ID)); os.IsNotExist(iconErr) {
 					a.snapshotReleaseIcon(x, temp)
@@ -517,11 +554,15 @@ func (a *App) updates(w http.ResponseWriter, r *http.Request) {
 	}
 	var latest *Release
 	for _, v := range a.releases(id) {
-		if v.Variant == variant && v.Platform == platform && v.Channel == channel && (v.Architecture == arch || v.Architecture == "universal") {
-			copy := v
-			latest = &copy
-			break
+		if v.Variant != variant || v.Platform != platform || v.Channel != channel || (v.Architecture != arch && v.Architecture != "universal") {
+			continue
 		}
+		if v.Delivery == "testflight" && v.Status != "available" {
+			continue
+		}
+		copy := v
+		latest = &copy
+		break
 	}
 	update := latest != nil && compareRelease(*latest, Release{Version: version, Build: build}) > 0
 	respond(w, 200, map[string]any{"update_available": update, "latest": latest, "current_version": version, "current_build": build})
@@ -540,6 +581,10 @@ func (a *App) download(w http.ResponseWriter, r *http.Request) {
 	v, ok := a.getRelease(r.PathValue("release"))
 	if !ok {
 		fail(w, 404, "版本不存在")
+		return
+	}
+	if v.Delivery == "testflight" {
+		fail(w, 409, "这个发布通过 TestFlight 分发，没有本地 IPA 下载")
 		return
 	}
 	f, e := os.Open(filepath.Join(a.data, "artifacts", v.ID))
@@ -562,6 +607,10 @@ func (a *App) manifest(w http.ResponseWriter, r *http.Request) {
 	v, ok := a.getRelease(r.PathValue("release"))
 	if !ok {
 		fail(w, 404, "版本不存在")
+		return
+	}
+	if v.Delivery == "testflight" {
+		fail(w, 409, "TestFlight 发布不使用 Ad Hoc OTA manifest")
 		return
 	}
 	if a.publicURL == "" || v.IOS == nil || !v.IOS.OTAEligible() {

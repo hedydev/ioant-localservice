@@ -39,6 +39,28 @@ function laneFor(job){
  return job.lane||job.result?.lane||job.profile_id||'';
 }
 
+function linkedReleases(job){
+ const ids=job.release_ids||[];
+ return ids.map(id=>state.releases.find(release=>release.id===id)).filter(Boolean);
+}
+
+function linkedRelease(job){
+ return linkedReleases(job)[0]||null;
+}
+
+function linkedReleaseActions(job){
+ return linkedReleases(job).map(release=>{
+  if(release.delivery==='testflight'){
+   return release.open_url
+    ?'<a class="build-artifact" href="'+escapeHTML(release.open_url)+'">在 TestFlight 中打开</a>'
+    :'<span class="meta">TestFlight 链接尚未可用</span>';
+  }
+  return release.download_url
+   ?'<a class="build-artifact" href="'+escapeHTML(release.download_url)+'">下载 '+escapeHTML((release.filename||release.id.slice(0,8)))+'</a>'
+   :'';
+ }).join(' ');
+}
+
 function stageLabel(job){
  const stages={
   preflight:'预检查',pull:'正在拉取',build:'正在构建',archive:'正在归档',validate:'正在验证',
@@ -48,6 +70,7 @@ function stageLabel(job){
  };
  if(job.status==='running')return stages[job.stage]||'处理中';
  if(job.status==='succeeded'&&laneFor(job)==='ios-testflight'){
+  if(job.stage_state==='failed')return 'TestFlight 当前不可测试';
   if(job.stage==='available')return 'TestFlight 可测试';
   if(job.stage==='processing')return 'Apple Processing';
   return '已提交到 App Store Connect';
@@ -69,18 +92,27 @@ function resultView(job){
  if(!job.result)return '';
  const result=job.result;
  if(result.lane==='ios-testflight'){
-  let stateText='已提交到 App Store Connect';
-  if(job.stage==='processing')stateText='Apple Processing';
-  if(job.stage==='available')stateText='TestFlight 可测试';
-  const link=job.status==='succeeded'&&job.testflight_url
-   ?'<a class="testflight-link" href="'+escapeHTML(job.testflight_url)+'">在 TestFlight 中打开</a>'
+  const release=linkedRelease(job);
+  const releaseStatus=release?.status||'submitted';
+  const stateText={
+   submitted:'已提交到 App Store Connect',
+   processing:'Apple Processing',
+   available:'TestFlight 可测试',
+   unavailable:'当前不可测试'
+  }[releaseStatus]||releaseStatus;
+  const openURL=release?.open_url||job.testflight_url||'';
+  const link=openURL
+   ?'<a class="testflight-link" href="'+escapeHTML(openURL)+'">在 TestFlight 中打开</a>'
    :'';
-  return '<div class="submission-result"><strong>TestFlight</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(stateText)+'</span>'+
-   '<small>'+(job.stage==='available'
-    ?'Apple 状态源已确认此构建可供 TestFlight 测试。'
-    :job.stage==='processing'
-     ?'Apple 状态源已确认正在 Processing；尚未确认可供测试。'
-     :'App Store Connect 已接受上传；ILS 当前没有 Apple Processing / 可测试状态查询结果，因此不会把提交成功显示成可测试。')+'</small>'+link+'</div>';
+  const detail=release?.status_message||
+   (releaseStatus==='submitted'
+    ?'App Store Connect 已接受上传；等待 Apple Processing。'
+    :releaseStatus==='processing'
+     ?'Apple 正在处理此构建。'
+     :releaseStatus==='available'
+      ?'Apple 状态已确认此构建可用于 TestFlight 测试。'
+      :'Apple 当前状态不允许测试。');
+  return '<div class="submission-result"><strong>iOS 发布</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(stateText)+'</span><small>'+escapeHTML(detail)+'</small>'+link+'</div>';
  }
  return '<div class="meta">结果：'+escapeHTML(result.lane||'artifact')+' · '+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</div>';
 }
@@ -107,9 +139,8 @@ function pipelineView(job){
   let stepState='pending';
   if(index<current)stepState='done';
   else if(index===current){
-   if(job.status==='failed')stepState='failed';
-   else if(job.status==='running')stepState='active';
-   else if(lane==='ios-testflight'&&currentStage==='processing')stepState='active';
+   if(job.status==='failed'||job.stage_state==='failed')stepState='failed';
+   else if(job.status==='running'||(lane==='ios-testflight'&&currentStage==='processing'))stepState='active';
    else stepState='done';
   }
   if(lane==='ios-testflight'&&job.status==='succeeded'&&currentStage==='submitted'&&index>current)stepState='waiting';
@@ -142,8 +173,8 @@ function renderJobs(jobs){
      progressView(job)+
      (job.error?'<p>'+escapeHTML(job.error)+'</p>':'')+
      resultView(job)+
-     (releases.length?'<div class="meta">关联安装包：'+releases.length+' 个</div>':'')+
-     releases.map(release=>'<a class="build-artifact" href="/api/releases/'+escapeHTML(release)+'/download">下载 '+escapeHTML(release.slice(0,8))+'</a>').join(' ')+
+     (releases.length?'<div class="meta">关联发布：'+releases.length+' 个</div>':'')+
+     linkedReleaseActions(job)+
     '</div>'+
     '<button data-build-log="'+escapeHTML(job.id)+'" aria-expanded="'+(expanded?'true':'false')+'" aria-controls="'+escapeHTML(logID)+'">'+(expanded?'收起日志':'查看日志')+'</button>'+
    '</div>'+

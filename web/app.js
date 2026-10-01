@@ -1,3 +1,4 @@
+import {initAppStoreConnect} from './js/app-store-connect.js';
 import {initPlatformUI} from './js/platform-ui.js';
 import {initCore} from './js/core.js';
 import {initNavigation} from './js/navigation.js';
@@ -18,4 +19,5 @@ initBuildSource();
 initBuildProfiles();
 initBuildJobs();
 initIOS();
+initAppStoreConnect();
 initAutomation();

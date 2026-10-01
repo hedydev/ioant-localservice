@@ -15,7 +15,7 @@ On first launch, ILS creates `.localservice/admin-token` with file mode `0600`. 
 
 The default data directory is `.localservice/`. Use `-data /absolute/path` to change it. Packages are stored under `artifacts/`, while metadata is written atomically to `state.json`. Back up the entire data directory. **Only one ILS process may use a given data directory at a time.** Multi-instance and clustered operation are not currently supported. Historical releases are not deleted automatically.
 
-The web UI is organized as project workspace tabs (Overview, Build & Release, Release History, iOS / TestFlight, Automation / API) backed by focused ES modules instead of one growing script. See [WEB_UI_ARCHITECTURE.md](docs/WEB_UI_ARCHITECTURE.md) before adding UI behavior.
+The web UI is organized as project workspace tabs (Overview, Build & Release, Release History, iOS Release, Automation / API) backed by focused ES modules instead of one growing script. Ad Hoc, TestFlight, and macOS outputs share one Release history; their delivery actions differ, but TestFlight is not a separate release catalog. See [WEB_UI_ARCHITECTURE.md](docs/WEB_UI_ARCHITECTURE.md) before adding UI behavior.
 
 ## Build and publish from local project directories
 
@@ -104,7 +104,7 @@ ILS_EVENT {"stage":"submitted","state":"succeeded","message":"Upload accepted"}
 
 An optional numeric `progress` is shown only when the underlying tool provides trustworthy progress. ILS does not invent percentages from elapsed time.
 
-For a local artifact lane, ILS validates the result file and artifact, then publishes through its own release API. For TestFlight, ILS stores the submitted result without creating a fake local IPA release. **App Store Connect upload acceptance is not the same as TestFlight processing completion or tester availability.** ILS therefore leaves a successful upload at **submitted / waiting for Apple Processing** unless an Apple status source proves a later state. TestFlight Release Profiles may optionally store a `https://testflight.apple.com/join/...` invitation URL; only successful TestFlight jobs show the corresponding open action.
+For a local artifact lane, ILS validates the result file and artifact, then publishes through its own release API. For TestFlight, ILS creates the same kind of Release metadata entry used by the rest of the UI, but with `delivery=testflight` and **no fake local IPA artifact**. **App Store Connect upload acceptance is not the same as TestFlight processing completion or tester availability.** The Release initially stays at `submitted`. When App Store Connect API access is configured, ILS synchronizes Apple Processing, Build Beta Detail, and an enabled Beta Group public link into that Release. The TestFlight action replaces download/install for that delivery method.
 
 Existing legacy Release Profiles using `artifact`, `version_command`, and `build_number_command`, plus project-owned self-publishing `release*.sh` scripts, remain supported for compatibility.
 
@@ -202,7 +202,7 @@ The script does not print the admin token in command arguments or normal output.
 
 Versions use full SemVer: `x.y.z[-prerelease][+metadata]`. The build number must currently be a positive integer; dotted Apple build numbers are not accepted. macOS accepts `.dmg`, `.pkg`, and `.zip`. iOS accepts `.ipa`. Bare `.app` bundles and `.xcarchive` uploads are not supported.
 
-API responses return a relative `download_url`; clients should resolve it against the ILS origin. For the same project, variant, platform, architecture, channel, version, and build, retrying an identical SHA-256 artifact returns `200`. Uploading different file contents under the same release identity returns `409`. The web UI refreshes every 20 seconds, new builds appear automatically, and historical builds remain available.
+Artifact Release API responses return a relative `download_url`; clients should resolve it against the ILS origin. TestFlight Release records instead return `delivery=testflight`, status metadata, and an optional `open_url`; they intentionally have no local download URL. For the same project, variant, platform, architecture, channel, version, and build, retrying an identical SHA-256 artifact returns `200`. Uploading different file contents under the same release identity returns `409`. The web UI refreshes every 20 seconds, new builds appear automatically, and historical builds remain available.
 
 | Endpoint | Purpose | Authentication |
 |---|---|---|
@@ -215,7 +215,13 @@ API responses return a relative `download_url`; clients should resolve it agains
 | `POST /api/projects/{project}/builds` | Start a build from `{"profile":"ios-dev"}` or a compatible project script | Bearer |
 | `GET /api/projects/{project}/builds` | Read recent ILS build jobs | Bearer |
 | `GET /api/builds/{job}/log` | Read a build log | Bearer |
-| `GET /api/projects/{project}/releases` | Release history sorted by SemVer and build descending | None |
+| `POST /api/local/select-app-store-connect-key` | Open the ILS Mac file picker for a local .p8 key path | Bearer |
+| `GET /api/app-store-connect/config` | Read App Store Connect connection status (never private-key contents) | Bearer |
+| `POST /api/app-store-connect/config` | Save Key ID / Issuer ID / local .p8 path and verify the connection | Bearer |
+| `DELETE /api/app-store-connect/config` | Remove ILS App Store Connect configuration; does not delete the .p8 file | Bearer |
+| `POST /api/app-store-connect/check` | Verify the configured App Store Connect API connection | Bearer |
+| `POST /api/app-store-connect/refresh` | Immediately refresh TestFlight Release states and public links | Bearer |
+| `GET /api/projects/{project}/releases` | Unified Release history sorted by SemVer and build descending | None |
 | `GET /api/projects/{project}/icon?platform=ios\|macos` | Cached platform-specific project App Icon for profile presentation | None |
 | `GET /api/builds/{job}/icon` | Per-build App Icon snapshot, with project-cache fallback for older jobs | None |
 | `GET /api/releases/{id}/icon` | Release-specific App Icon snapshot when available | None |
@@ -235,7 +241,7 @@ Example update check:
 curl 'http://127.0.0.1:8787/api/projects/demo-app/updates?platform=ios&architecture=arm64&channel=dev&current_version=1.0.0&current_build=11'
 ~~~
 
-ILS compares SemVer first and build number second. Channels are isolated. Architecture filtering includes compatible `universal` packages. SemVer build metadata (`+...`) does not affect precedence, and a prerelease is lower than the corresponding stable release. If the client is newer than the latest server release, ILS does not recommend a downgrade.
+ILS compares SemVer first and build number second. Channels are isolated. Architecture filtering includes compatible `universal` packages. SemVer build metadata (`+...`) does not affect precedence, and a prerelease is lower than the corresponding stable release. TestFlight submissions that are still submitted/processing/unavailable remain visible in release history but are not recommended by the update-check endpoint until Apple status is `available`. If the client is newer than the latest server release, ILS does not recommend a downgrade.
 
 A browser cannot automatically read the version of an application already installed on an iPhone. The app must call the update API itself, or the user must provide the current version manually.
 
@@ -258,3 +264,11 @@ The Mac currently exposes team `64RS366WKG` and an Apple Distribution signing id
 ## ILS environment aliases
 
 ILS-owned build jobs export both the short ILS names and the existing compatibility names. New automation may use `ILS_URL`, `ILS_TOKEN_FILE`, `ILS_ROOT`, `ILS_PROJECT_ID`, `ILS_JOB_ID`, `ILS_OUTPUT_DIR`, and `ILS_GIT_COMMIT`. Existing `LOCALSERVICE_*` variables continue to work, and `scripts/push.sh` accepts either naming scheme.
+
+## App Store Connect status synchronization
+
+ILS can optionally connect to the official App Store Connect API from the administrator UI. Configure the API Key ID, optional Issuer ID, and the absolute path to the downloaded `.p8` private key on the ILS Mac. ILS stores only those references in its protected data directory; it does not copy private-key contents into project files, Release metadata, browser responses, or logs.
+
+When configured, ILS resolves each recent TestFlight Release by Bundle ID, marketing version, and build number. It synchronizes Apple binary processing, Build Beta Detail, and enabled Beta Group public links into the same Release record shown in Overview, Release History, and iOS Release.
+
+See [docs/APP_STORE_CONNECT.md](docs/APP_STORE_CONNECT.md) for setup, security, and state mapping.

@@ -93,3 +93,36 @@ func TestNormalizeReleaseProfileTestFlightLink(t *testing.T) {
 		t.Fatal("expected TestFlight URL on non-TestFlight lane to fail")
 	}
 }
+
+
+func TestValidateContractResultTestFlightRequiresBundleID(t *testing.T) {
+	profile := ReleaseProfile{
+		ID:             "ios-testflight",
+		Name:           "iOS TestFlight",
+		Platform:       "ios",
+		Architecture:   "arm64",
+		Channel:        "beta",
+		Variant:        "default",
+		Lane:           "ios-testflight",
+		ResultContract: "ils-result-v1",
+		BuildCommand:   "true",
+	}
+	result := BuildResult{
+		SchemaVersion:    1,
+		Lane:             "ios-testflight",
+		Status:           "submitted",
+		Platform:         "ios",
+		Version:          "1.2.3",
+		Build:            "45",
+		Architecture:     "arm64",
+		Distribution:     "app-store-connect",
+		SubmissionResult: "upload-succeeded",
+	}
+	if _, err := validateContractResult(profile, result, t.TempDir()); err == nil {
+		t.Fatal("expected TestFlight result without bundle_id to fail")
+	}
+	result.BundleID = "com.example.demo"
+	if _, err := validateContractResult(profile, result, t.TempDir()); err != nil {
+		t.Fatalf("valid TestFlight result failed: %v", err)
+	}
+}

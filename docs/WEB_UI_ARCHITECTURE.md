@@ -9,7 +9,7 @@ The ILS web UI is a small framework-free ES-module application. The browser entr
 | Overview | Latest release and project release counts | Public |
 | Build & Release | Git source, Release Profiles, build jobs and live logs | Admin |
 | Release History | Filters, downloads, history and manual upload | Public browsing; upload is Admin |
-| iOS Install | Public device enrollment and installable iOS releases; admin-only device UDIDs, signing controls and TestFlight guidance live in the same view | Public + Admin enhancements |
+| iOS Release | Public Ad Hoc/TestFlight releases and device enrollment; admin-only device UDIDs, signing controls and App Store Connect status sync live in the same view | Public + Admin enhancements |
 | Automation / API | External `push.sh` and API integration guidance | Admin |
 
 The selected view is stored in the URL hash, for example `#builds` or `#releases`. Admin-only hashes fall back to Overview when the browser has not verified an administrator session.
@@ -30,7 +30,8 @@ web/
 │  ├─ build-source.js      # Git source and legacy project scripts
 │  ├─ build-profiles.js    # Release Profile CRUD and run actions
 │  ├─ build-jobs.js        # build history, progress and live log following
-│  ├─ ios.js               # devices and signing compatibility workflow
+│  ├─ ios.js               # unified iOS releases, devices and signing compatibility workflow
+│  ├─ app-store-connect.js # App Store Connect connection and TestFlight state refresh controls
 │  └─ automation.js        # API/push integration presentation
 ├─ style.css               # shared/base visual language
 └─ workspace.css           # workspace tabs and feature-module layouts
@@ -44,12 +45,13 @@ Keep these boundaries when adding features:
 
 - Authentication and Bearer-header behavior belong in `core.js`.
 - Project selection and shared project/release fetching belong in `projects.js`.
-- Release/package presentation belongs in `releases.js`.
+- Unified Release presentation belongs in `releases.js`; delivery-specific actions must branch on Release metadata instead of creating separate histories.
 - Platform/device icon rendering belongs in `platform-ui.js`; feature modules must reuse it instead of embedding their own SVG or emoji.
 - Git source configuration must not be added to release-history code.
 - Release Profile forms and CRUD belong in `build-profiles.js`.
 - Task state, progress and build logs belong in `build-jobs.js`.
-- Public iOS enrollment/install presentation and admin-only device/signing/TestFlight controls belong in `ios.js`.
+- Public iOS Release/enrollment presentation and device/signing compatibility controls belong in `ios.js`.
+- App Store Connect connection, validation and manual TestFlight status refresh controls belong in `app-store-connect.js`; Apple API/JWT logic stays backend-only.
 - External integration examples belong in `automation.js`.
 - Navigation code must not perform build, release or signing API actions.
 
@@ -154,9 +156,11 @@ upload
 → TestFlight available
 ```
 
-A successful Xcode upload or `ils-result-v1` result with `status=submitted` stops at **submitted to App Store Connect**. ILS must not mark Processing or tester availability unless a connected Apple status source proves those states. The current implementation has no App Store Connect processing-status query, so successful submissions remain visibly waiting for Apple Processing.
+A successful Xcode upload or `ils-result-v1` result with `status=submitted` creates a normal ILS Release metadata record with `delivery=testflight` and initially stops at **submitted to App Store Connect**. ILS does not invent Processing or tester availability.
 
-An `ios-testflight` Release Profile may store an optional `testflight_url` using Apple's `https://testflight.apple.com/join/...` invitation form. The build job snapshots that URL when it starts. Only a successful TestFlight job renders **在 TestFlight 中打开**; Ad Hoc and macOS jobs never receive that action.
+When App Store Connect API access is configured, ILS polls Apple for the matching Bundle ID / marketing version / build number and synchronizes `processingState`, Build Beta Detail, and an enabled Beta Group public link. Those verified states update both the Release card and its associated Build Job.
+
+The TestFlight Release is rendered by the same Overview, Release History and iOS release-list components as Ad Hoc. Its primary action is **在 TestFlight 中打开** instead of IPA install/download. An `ios-testflight` Release Profile may still store an optional `testflight_url` invitation as a fallback when Apple does not expose a public link through the configured account.
 
 ## App Icon presentation
 
@@ -164,6 +168,24 @@ App Icon artwork is separate from the Mac/iPhone/iPad platform-outline glyphs.
 
 ILS keeps a platform-specific project icon cache. When a linked Git source is inspected or pulled, ILS scans tracked `*.appiconset/Contents.json` catalogs and caches the best iOS and macOS PNG independently. It does not hard-code a product name or image path. Release Profiles use the current project cache; each new Build Job snapshots the platform icon into its own job directory so later source icon changes do not rewrite that task's presentation.
 
-For published iOS IPA files, ILS additionally extracts the largest usable compiled main-app App Icon PNG when available. Every new local Release snapshots an icon into release-specific storage; macOS and fallback releases use the current platform-specific project cache. Existing releases are backfilled lazily from their retained artifact/cache when possible. Release History and the iOS install list use the release snapshot.
+For published iOS IPA files, ILS additionally extracts the largest usable compiled main-app App Icon PNG when available. Every new Release snapshots an icon into release-specific storage. TestFlight releases and macOS/fallback releases use the current platform-specific project cache when no artifact icon can be extracted. Existing releases are backfilled lazily from their retained artifact/cache when possible. Release History and the iOS release list use the release snapshot.
 
 If no usable icon is available, the UI omits the App Icon and keeps the platform glyphs.
+
+## App Store Connect module boundary
+
+App Store Connect authentication and status resolution live in the backend service; the browser never signs JWTs and never receives `.p8` contents.
+
+The administrator-facing connection controls live on the iOS Release page because they affect TestFlight delivery/status, but TestFlight releases themselves remain ordinary Release records and are not rendered in a separate history.
+
+The backend stores only:
+
+```text
+key_id
+issuer_id        # optional for Individual API keys
+private_key_path # absolute path on the ILS Mac
+```
+
+The private key stays on disk. Browser/API responses may show its path and file permission to an authenticated administrator, but never its contents.
+
+Public release-list reads may schedule a rate-limited background TestFlight refresh when a valid App Store Connect configuration exists. Network refresh does not block the current release-list response.

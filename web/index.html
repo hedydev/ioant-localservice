@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
-<title>ILS · 构建与安装包分发</title>
+<title>ILS · 构建与发布</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23182736'/%3E%3Cpath d='M9 8v16h15v-5H14V8z' fill='%23b2f36b'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/workspace.css">
@@ -24,15 +24,15 @@
 <aside>
   <div class="section-label">项目空间 <button data-admin hidden id="new-project" class="icon-button" aria-label="新建项目">＋</button></div>
   <nav id="projects" aria-label="项目"></nav>
-  <div class="aside-note">每一个构建，都有迹可循。<br>安装包保存在这台 Mac 上。</div>
+  <div class="aside-note">每一个构建，都有迹可循。<br>发布记录统一管理，本地产物保存在这台 Mac 上。</div>
 </aside>
 
 <main>
   <div class="page-heading">
     <div>
       <div class="eyebrow">BUILD DISTRIBUTION</div>
-      <h1 id="project-title">安装包分发</h1>
-      <p id="project-subtitle">选择项目，查看最新构建与历史版本。</p>
+      <h1 id="project-title">发布管理</h1>
+      <p id="project-subtitle">选择项目，查看最新构建、发布状态与历史版本。</p>
     </div>
   </div>
 
@@ -42,13 +42,13 @@
     <button data-view="overview" aria-pressed="true">概览</button>
     <button data-view="builds" data-admin hidden aria-pressed="false">构建与发布</button>
     <button data-view="releases" aria-pressed="false">版本历史</button>
-    <button data-view="ios" aria-pressed="false"><span data-platform-targets="iphone ipad"></span>iOS 安装</button>
+    <button data-view="ios" aria-pressed="false"><span data-platform-targets="iphone ipad"></span>iOS 发布</button>
     <button data-view="automation" data-admin hidden aria-pressed="false">自动化 / API</button>
   </nav>
 
   <section id="view-overview" class="workspace-view" data-view-panel="overview">
     <div class="view-heading">
-      <div><h2>项目概览</h2><p>当前项目最新安装包与发布状态。</p></div>
+      <div><h2>项目概览</h2><p>当前项目最新发布与状态。</p></div>
     </div>
     <div id="overview-stats" class="overview-stats"></div>
     <div id="overview-latest"></div>
@@ -93,18 +93,18 @@
 
   <section id="view-releases" class="workspace-view" data-view-panel="releases" hidden>
     <div class="view-heading">
-      <div><h2>版本历史</h2><p>浏览、筛选、下载和手动发布安装包。</p></div>
+      <div><h2>版本历史</h2><p>浏览所有发布；本地包可下载安装，TestFlight 发布可直接打开 TestFlight。</p></div>
       <button data-admin hidden id="publish-button" class="primary">＋ 手动发布安装包</button>
     </div>
 
-    <div class="toolbar" aria-label="安装包筛选">
+    <div class="toolbar" aria-label="发布筛选">
       <div class="segmented" id="platforms">
         <button data-platform="all" aria-pressed="true">全部平台</button>
         <button data-platform="ios" aria-pressed="false"><span data-platform-targets="iphone ipad"></span>iOS</button>
         <button data-platform="macos" aria-pressed="false"><span data-platform-targets="mac"></span>macOS</button>
       </div>
       <label>渠道 <select id="channel"><option value="all">全部渠道</option><option value="dev">开发版</option><option value="beta">测试版</option><option value="stable">正式版</option></select></label>
-      <label>安装包 <select id="variant"><option value="all">全部安装包</option></select></label>
+      <label>发布 <select id="variant"><option value="all">全部发布</option></select></label>
       <button id="refresh" class="quiet">刷新</button>
     </div>
 
@@ -128,7 +128,7 @@
 
   <section id="view-ios" class="workspace-view" data-view-panel="ios" hidden>
     <div class="view-heading">
-      <div><h2><span data-platform-targets="iphone ipad"></span>iOS 安装</h2><p>新设备可以先登记，再安装管理员为该设备发布的 Ad Hoc 版本。</p></div>
+      <div><h2><span data-platform-targets="iphone ipad"></span>iOS 发布</h2><p>Ad Hoc 与 TestFlight 都是 iOS 发布；区别只在交付方式。</p></div>
       <button type="button" data-go-view="builds" data-admin hidden>查看 iOS Release Profiles</button>
     </div>
 
@@ -143,7 +143,7 @@
     </article>
 
     <article class="panel-card">
-      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>可安装的 iOS 版本</h2><span class="meta">当前项目</span></div></div>
+      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>iOS 发布</h2><span class="meta">Ad Hoc / TestFlight</span></div></div>
       <div id="ios-install-releases"></div>
     </article>
 
@@ -162,9 +162,28 @@
     </article>
 
     <article class="panel-card" data-admin hidden>
-      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>TestFlight</h2><span class="meta">管理员 · App Store Connect</span></div></div>
-      <p>TestFlight 是独立发布流程，不会和 Ad Hoc 一键同时执行。通过 <code>ios-testflight</code> Release Profile 单独提交。</p>
-      <button type="button" data-go-view="builds">前往构建与发布</button>
+      <div class="section-heading"><div><h2>App Store Connect 状态同步</h2><span class="meta">管理员 · TestFlight</span></div></div>
+      <p>配置 API Key 后，ILS 会查询 TestFlight 的 Apple Processing、内部/外部 Beta 状态和 Beta Group public link，并把状态同步到同一套发布记录中。ILS 只保存 Key ID、Issuer ID 和这台 Mac 上的 .p8 路径，不保存私钥内容。</p>
+      <form id="asc-form">
+        <div class="form-grid">
+          <label>Key ID<input name="key_id" maxlength="10" placeholder="2X9R4HXF34" autocomplete="off" required></label>
+          <label>Issuer ID <span class="meta">Team Key 必填；Individual Key 留空</span><input name="issuer_id" maxlength="128" autocomplete="off"></label>
+        </div>
+        <label>Private Key (.p8)
+          <div class="folder-input">
+            <input name="private_key_path" placeholder="/Users/you/Downloads/AuthKey_XXXXXXXXXX.p8" autocomplete="off" required>
+            <button id="asc-choose-key" type="button">选择 .p8…</button>
+          </div>
+        </label>
+        <div class="profile-actions">
+          <button type="submit" class="primary">保存并验证</button>
+          <button id="asc-check" type="button">验证连接</button>
+          <button id="asc-refresh" type="button">刷新发布状态</button>
+          <button id="asc-delete" type="button" class="danger">移除配置</button>
+        </div>
+      </form>
+      <p id="asc-status" class="meta" role="status">正在读取 App Store Connect 配置…</p>
+      <p class="meta">Team API Key 在 App Store Connect → Users and Access → Integrations 创建；Individual API Key 在个人资料中创建。Individual Key 可用于状态同步；xcodebuild 上传仍使用已登录的 Xcode 账号。.p8 私钥只可下载一次，请保存在这台 Mac 的受保护目录，不要提交到 Git。</p>
     </article>
   </section>
 
@@ -210,10 +229,10 @@
     <label>架构<select name="architecture"><option value="arm64">arm64</option><option value="universal">universal</option><option value="x86_64">x86_64</option></select></label>
     <label>发布 Lane<select name="lane"><option value="ios-adhoc">iOS · Ad Hoc / ILS</option><option value="ios-testflight">iOS · TestFlight</option><option value="macos-test">macOS · Test</option><option value="macos-release">macOS · Release / Notarized</option></select></label>
     <label>Apple Team<select id="profile-apple-team" name="apple_team_id"><option value="">自动检测（仅一个 Team 时）</option></select><span id="profile-apple-team-help" class="meta">打开 Profile 时由 ILS 读取这台 Mac 的签名身份。</span></label>
-    <label id="profile-testflight-url-field" hidden>TestFlight 邀请链接<input name="testflight_url" type="url" placeholder="https://testflight.apple.com/join/..." autocomplete="off"><span class="meta">仅 TestFlight lane。iPhone/iPad 会优先交给 TestFlight 通用链接处理；Mac 打开 Apple TestFlight 页面。</span></label>
+    <label id="profile-testflight-url-field" hidden>TestFlight 链接（可选 fallback）<input name="testflight_url" type="url" placeholder="https://testflight.apple.com/join/..." autocomplete="off"><span class="meta">连接 App Store Connect API 后，ILS 会优先读取 Beta Group 的 public link；这里可保留手工 fallback。</span></label>
     <label>结果契约<select name="result_contract"><option value="ils-result-v1">ILS Result v1（推荐）</option><option value="">Legacy artifact fields</option></select></label>
     <label>渠道<select name="channel"><option value="dev">dev</option><option value="beta">beta</option><option value="stable">stable</option></select></label>
-    <label>安装包标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>
+    <label>发布标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>
   </div>
   <label>Build Command<textarea name="build_command" rows="4" placeholder="例如：bash scripts/ils-build-ios.sh --adhoc" required></textarea></label>
   <label>Package Command <span class="meta">可选；标准脚本通常不需要</span><textarea name="package_command" rows="3"></textarea></label>
@@ -237,7 +256,7 @@
     <label>构建号<input name="build" type="number" min="1" step="1" required></label>
     <label>渠道<select name="channel"><option value="dev">开发版</option><option value="beta">测试版</option><option value="stable">正式版</option></select></label>
   </div>
-  <label>安装包标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>
+  <label>发布标识<input name="variant" value="default" pattern="[a-z0-9][a-z0-9-]{0,62}" required></label>
   <label>更新说明<textarea name="notes" rows="3" maxlength="16000"></textarea></label>
   <label class="file-zone">选择安装包<input name="file" type="file" accept=".ipa,.dmg,.pkg,.zip" required><small>IPA / DMG / PKG / ZIP · 最大 4 GB</small></label>
   <p class="form-error" role="alert"></p>

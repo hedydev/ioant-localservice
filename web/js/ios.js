@@ -3,13 +3,23 @@ import {$,state,api,notice,needAdmin,escapeHTML,formatSize,channelNames} from '.
 import {refreshData} from './projects.js';
 import {platformIcons,targetsForRelease,releaseAppIcon} from './platform-ui.js';
 
+function testFlightStatusLabel(release){
+ return ({
+  submitted:'已提交到 App Store Connect',
+  processing:'Apple Processing',
+  available:'TestFlight 可测试',
+  unavailable:'当前不可测试'
+ })[release.status]||release.status||'已提交到 App Store Connect';
+}
+
 function iosInstallNote(release){
+ if(release.delivery==='testflight')return release.status_message||testFlightStatusLabel(release);
  const info=release.ios;
  if(!info)return '签名状态未知';
  if(info.profile_type==='ad-hoc')return 'Ad Hoc · 仅限 provisioning profile 中已登记的设备';
  if(info.profile_type==='development')return '开发签名 · 通常需要 Xcode / Configurator 安装';
  if(info.profile_type==='enterprise')return '企业分发 · 仅限组织内部';
- if(info.profile_type==='app-store')return 'App Store / TestFlight 包不通过此页直接安装';
+ if(info.profile_type==='app-store')return 'App Store 签名';
  return info.profile_type||'签名状态未知';
 }
 
@@ -18,25 +28,35 @@ function renderPublicIOS(){
  const container=$('#ios-install-releases');
 
  if(!state.project){
-  container.innerHTML='<div class="empty"><strong>请先选择项目</strong>选择项目后，这里会显示它的 iOS 安装包。</div>';
+  container.innerHTML='<div class="empty"><strong>请先选择项目</strong>选择项目后，这里会显示它的 iOS 发布。</div>';
   return;
  }
 
  if(!releases.length){
-  container.innerHTML='<div class="empty"><strong>还没有 iOS 安装包</strong>管理员发布 Ad Hoc IPA 后，会出现在这里。</div>';
+  container.innerHTML='<div class="empty"><strong>还没有 iOS 发布</strong>Ad Hoc 与 TestFlight 发布都会出现在这里。</div>';
   return;
  }
 
  container.innerHTML=releases.map(release=>{
-  const install=release.install_url
-   ?'<a class="download" href="'+escapeHTML(release.install_url)+'">安装到 iPhone / iPad</a>'
-   :'';
-  const download='<a class="download '+(install?'secondary':'')+'" href="'+escapeHTML(release.download_url)+'">下载 IPA</a>';
+  let actions='';
+  if(release.delivery==='testflight'){
+   actions=release.open_url
+    ?'<a class="download" href="'+escapeHTML(release.open_url)+'">在 TestFlight 中打开</a>'
+    :'<span class="meta">TestFlight 链接尚未可用</span>';
+  }else{
+   const install=release.install_url
+    ?'<a class="download" href="'+escapeHTML(release.install_url)+'">安装到 iPhone / iPad</a>'
+    :'';
+   const download=release.download_url
+    ?'<a class="download '+(install?'secondary':'')+'" href="'+escapeHTML(release.download_url)+'">下载 IPA</a>'
+    :'';
+   actions=install+download;
+  }
   return '<article class="release ios-install-release">'+
-   '<div class="release-top"><div class="release-identity">'+releaseAppIcon(release,{className:'release-app-icon',title:'App Icon'})+'<div><strong>'+platformIcons(targetsForRelease(release))+escapeHTML(release.version)+'</strong> <span class="badge">'+escapeHTML(channelNames[release.channel]||release.channel)+'</span><div class="meta">build '+release.build+'</div></div></div><span class="meta">'+formatSize(release.size)+'</span></div>'+
+   '<div class="release-top"><div class="release-identity">'+releaseAppIcon(release,{className:'release-app-icon',title:'App Icon'})+'<div><strong>'+platformIcons(targetsForRelease(release))+escapeHTML(release.version)+'</strong> <span class="badge">'+escapeHTML(channelNames[release.channel]||release.channel)+'</span><div class="meta">build '+release.build+' · '+(release.delivery==='testflight'?'TestFlight':'Ad Hoc / IPA')+'</div></div></div><span class="meta">'+(release.delivery==='testflight'?escapeHTML(testFlightStatusLabel(release)):formatSize(release.size))+'</span></div>'+
    '<p>'+escapeHTML(release.notes||'暂无更新说明')+'</p>'+
    '<p class="meta">'+escapeHTML(iosInstallNote(release))+'</p>'+
-   '<div class="download-row">'+install+download+'</div>'+
+   '<div class="download-row">'+actions+'</div>'+
   '</article>';
  }).join('');
 }

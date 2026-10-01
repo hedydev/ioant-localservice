@@ -175,23 +175,23 @@ Release archive
 → write submitted result
 ```
 
-ILS stores the task, stage, live log and upload result. TestFlight has no fake local IPA release record.
+ILS stores the task, stage, live log and upload result, then creates a normal ILS Release metadata record with `delivery=testflight`. That Release appears in Overview, Release History and iOS Release beside Ad Hoc releases. It has no fake local IPA/download action; its delivery action is TestFlight.
 
-An upload accepted by App Store Connect is reported as **submitted/upload succeeded**. It is not reported as **available** unless an Apple status source later proves processing has finished.
+An upload accepted by App Store Connect starts as **submitted**. When ILS App Store Connect API access is configured, the same Release is updated from Apple evidence to **processing**, **available**, or **unavailable**, and an enabled Beta Group public link is used when available.
 
 ## App Store Connect authentication
 
 The TestFlight entrypoint can use the Apple account already configured in Xcode.
 
-For unattended API-key authentication, start ILS with these variables available to its process:
+Preferred unattended setup is now the ILS **iOS Release → App Store Connect Status Sync** UI. Configure the Key ID, Team Issuer ID (or leave it blank for an Individual API Key), and select the local `.p8` file. ILS stores only the identifiers and local path, and exposes the compatible variables to the TestFlight child process:
 
 ```text
 ILS_ASC_KEY_PATH
 ILS_ASC_KEY_ID
-ILS_ASC_ISSUER_ID
+ILS_ASC_ISSUER_ID   # Team API Key only
 ```
 
-The key file must stay outside Git. Do not log the private-key contents.
+The key file must stay outside Git. Do not log or copy the private-key contents. A Team key is injected into Sowhat's xcodebuild flow through all three variables above. An Individual key is used by ILS for status synchronization only; Sowhat then continues using the Apple account already signed into Xcode for upload. The same configured connection is used after upload to query Apple Processing, Build Beta Detail and Beta Group public links.
 
 For signing-team selection, the standard iOS script accepts:
 
@@ -232,6 +232,6 @@ Do not treat the existence of the profiles or scripts as release evidence. Valid
 5. Run **macOS Test DMG** first and confirm ILS creates a real release record and downloadable DMG.
 6. Run **iOS Ad Hoc** and confirm the real signed IPA appears as an ILS release.
 7. Install/run on the intended registered iPhone/iPad as a separate user validation step.
-8. Run **iOS TestFlight** only when an actual App Store Connect submission is intended. Confirm ILS shows upload feedback, then confirm processing/availability separately in App Store Connect.
+8. Run **iOS TestFlight** only when an actual App Store Connect submission is intended. Confirm the TestFlight Release appears in the same release history as Ad Hoc. If App Store Connect API sync is configured, confirm the Release advances from submitted to the Apple-reported processing/availability state without manually checking a separate ILS catalog.
 
 A build/export/upload success is not physical-device runtime acceptance.

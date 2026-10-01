@@ -757,6 +757,9 @@ func validateContractResult(profile ReleaseProfile, result BuildResult, output s
 		if result.Status != "submitted" || result.Distribution != "app-store-connect" || result.SubmissionResult != "upload-succeeded" {
 			return "", fmt.Errorf("TestFlight 结果必须明确为 submitted + app-store-connect + upload-succeeded")
 		}
+		if strings.TrimSpace(result.BundleID) == "" {
+			return "", fmt.Errorf("TestFlight 结果必须提供 bundle_id，ILS 需要它查询 App Store Connect 状态")
+		}
 		if result.Artifact != "" {
 			return "", fmt.Errorf("TestFlight 结果不应伪造本地发布 artifact")
 		}
@@ -948,6 +951,9 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 		if profile.AppleTeamID!="" {
 			env=append(env,"ILS_APPLE_TEAM_ID="+profile.AppleTeamID)
 		}
+		if profile.Lane=="ios-testflight" {
+			env=append(env,a.appStoreConnectBuildEnv()...)
+		}
 	}
 	if profile==nil {
 		j.Stage="script"; _=a.writeBuild(j)
@@ -974,8 +980,11 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 			version,build=result.Version,result.Build
 			_=a.writeBuild(j)
 			if profile.Lane=="ios-testflight" {
+				release,publishErr:=a.publishTestFlightRelease(j,*profile,result)
+				if publishErr!=nil { finish("failed","TestFlight 已上传，但 ILS 发布记录保存失败："+publishErr.Error()); return }
+				a.recordBuildPublication(j.ID,j.ProjectID,release.ID)
 				j.Stage="submitted"; j.StageState="succeeded"; j.Progress=nil
-				j.Message="已提交到 App Store Connect；等待 Apple Processing"
+				j.Message="已发布到 ILS；App Store Connect 已接受上传，等待 Apple Processing"
 				finish("succeeded","")
 				return
 			}
