@@ -2,7 +2,7 @@
 
 > Last updated: 2026-10-02  
 > AI-Agent: ChatGPT  
-> AI-Session: `n6q4m8zt`
+> AI-Session: `ils-handoff-review-2026-10-02`
 
 本文记录当前这轮 ILS UI / Apple Release 工作的关键实现、产品语义和下一步验证点，供下一位 AI 或开发者直接接手。可复用的架构规则仍以 `docs/WEB_UI_ARCHITECTURE.md`、`docs/RELEASE_PROFILES.md`、`docs/APP_STORE_CONNECT.md` 为准。
 
@@ -70,12 +70,16 @@ ILS 已加入 App Store Connect API 集成，用于在 TestFlight 上传之后�
 ```text
 Bundle ID
 → App Store Connect App
+→ Build Upload
+→ Build Upload.state
 → iOS prerelease version
-→ build
-→ processingState
+→ Build
+→ Build.processingState
 → Build Beta Detail
 → Beta Group / public link
 ```
+
+Build Upload 是早期 Apple Processing 的第一证据层；普通 Build resource 尚未出现时，ILS 也必须能与 App Store Connect 的 Build Uploads 状态保持一致。
 
 统一 Release 状态：
 
@@ -210,6 +214,19 @@ platform
 
 这些改动尚未在用户 Mac 上重新执行 `go test ./...` / `go build`，也尚未确认真实 224/228 是否已完成回填，不能写成通过。
 
+### 1.11 交接代码复核与加固（2026-10-02）
+
+接手 `385c0880f48d61f6f542b586aacbeb8bad15964f` 后，对 `0ffef75e...` / `943a302...` / `6ab460a...` 的实现和 docs 做了静态复核。整体方向保留，但修正了三个边界问题：
+
+- 历史 TestFlight recovery 不再因为整个 Xcode `build.log` 超过 2 MiB 就放弃。ILS 现在只读取日志尾部的有界窗口并寻找严格结构化的 `ILS_EVENT {stage:"upload",state:"succeeded"}`；仍不接受自由文本作为上传成功证据。
+- `publishTestFlightRelease()` 的 App Icon snapshot 移到去重确认之后，重复 reconciliation / retry 不再为随机临时 Release ID 写入孤儿 `release-icons/*.png`。
+- 历史 reconciliation 仍会返回 skip/error 诊断，但单个旧 Job 的读取/关联问题不再阻断 ILS 启动，也不再阻断同一次 App Store Connect Apple 状态刷新；前端会显示 reconciliation warning。
+- 新增回归测试覆盖大日志尾部 upload-success、TestFlight Release 去重 icon 泄漏、以及历史 Job 读取失败不应阻止 `New()` 启动。
+
+核心加固提交：`ca40a14a13a9015e01e3612bf854a8b4799d6077`。
+
+这些新增测试仍需在用户 Mac 上真实执行 `go test ./...` 和 `go build` 后才能记录为通过。
+
 ## 2. 当前产品语义必须保持
 
 最重要的一条：
@@ -258,11 +275,11 @@ App Store Connect UI 已从 iOS 主模块中拆出，避免后续 Apple API / Te
 最近一次主分支实现提交：
 
 ```text
-6ab460af2ca2d015905bd98dbd3daf81434361f1
-Improve TestFlight repair feedback and legacy recovery
+ca40a14a13a9015e01e3612bf854a8b4799d6077
+Harden TestFlight reconciliation recovery
 ```
 
-提交在既有 TestFlight / App Store Connect 集成上新增：
+当前实现包含此前 reconciliation/backfill、macOS canonical-path 修复，以及本次交接复核后的大日志/去重/启动容错加固：
 
 - 从持久化 `upload-succeeded` Build Job 自动回填缺失的 TestFlight Release；
 - 重建并持久化 Job `release_ids` 关联；
@@ -270,9 +287,12 @@ Improve TestFlight repair feedback and legacy recovery
 - 新 Build Job 保存恢复所需的 Release Profile 元数据快照；
 - TestFlight 去重按 Bundle ID + version + build 的 Apple build 身份收敛；
 - Build Job 在缺失 Release 时明确显示“ILS Release 待同步”，不再用 fallback card 掩盖数据缺口；
-- 新增历史任务回填、Profile snapshot fallback、拒绝不可信上传结果和 Apple build 去重测试。
+- 新增历史任务回填、Profile snapshot fallback、拒绝不可信上传结果和 Apple build 去重测试；
+- 大型 Xcode 日志尾部的结构化 upload-success recovery；
+- 重复 reconciliation 不产生孤儿 Release Icon；
+- 单个历史 Job recovery 错误不阻断服务启动/Apple 刷新。
 
-**本次改动已做 GitHub 侧静态结构检查。用户随后在 macOS 实际执行 `go test ./...`，编译进入测试阶段，但发现两个与 macOS canonical path 相关的既有测试失败：生成 App Icon 因 `/var → /private/var` 被误判为仓库内 symlink，ASC Team Key env 测试则错误要求未 canonicalize 的临时路径。提交 `943a302642696b2c40635708d3dba83dec4f455d` 已修复：先 canonicalize 可信 repo root、仍拒绝 repo 内 symlink/traversal，并让 ASC 测试按真实 .p8 路径断言。修复后的 `go test ./...` / `go build` 尚待用户 Mac 复跑，不能记录为通过。**
+**已完成 GitHub 侧静态代码/文档复核。此前用户在 macOS 运行 `go test ./...` 时发现的 `/var → /private/var` canonical path 问题已由 `943a302642696b2c40635708d3dba83dec4f455d` 修复；本次 `ca40a14...` 又新增了三项 recovery 回归测试。当前 HEAD 的完整 `go test ./...` / `go build` 仍未在用户 Mac 上复跑，不能记录为通过。**
 
 因此下一位接手者首先应该在本机从当前 `main` 开始：
 
@@ -311,12 +331,13 @@ go build -o bin/localservice ./cmd/localservice
 - 不把 TestFlight 上传成功解释为 TestFlight 已可安装。
 
 
-## 7. 暂停点与交接（2026-10-02）
+## 7. 当前接手点与验证（2026-10-02）
 
-本轮 ILS 工作按用户要求在此暂停；当前 AI 回到 Sowhat 客户端开发，不再继续修改 ILS。
+ILS 已重新由当前会话接手；不要再按“返回 Sowhat 后暂停”的旧状态理解此文档。
 
 当前代码实现点：
 
+- `ca40a14a13a9015e01e3612bf854a8b4799d6077` — 本次交接复核加固：大日志尾部结构化证据、去重 icon 泄漏修复、reconciliation 启动/刷新容错。
 - `6ab460af2ca2d015905bd98dbd3daf81434361f1` — TestFlight 历史 Release 回填诊断、旧 Job 结构化上传成功证据兼容、刷新后同步重载 Release/Build Job、固定顶部操作通知。
 - `943a302642696b2c40635708d3dba83dec4f455d` — 修复 macOS `/var -> /private/var` canonical path 导致的 App Icon/ASC 测试问题。
 - `0ffef75e96ea9868ace0d2413de3844b3d0b2882` — 初始 TestFlight Release reconciliation/backfill。
