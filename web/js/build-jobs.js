@@ -77,7 +77,7 @@ function stageLabel(job){
   if(job.stage_state==='failed')return 'TestFlight 当前不可测试';
   if(job.stage==='available')return 'TestFlight 可测试';
   if(job.stage==='processing')return 'Apple Processing';
-  return '已提交到 App Store Connect';
+  return 'ILS Release 待同步';
  }
  if(job.status==='succeeded')return '发布成功';
  return '失败';
@@ -99,14 +99,16 @@ function resultView(job){
   const release=linkedRelease(job);
   const releaseStatus=release?.status||'submitted';
   const presentation=release||{delivery:'testflight',status:releaseStatus,status_message:job.message||''};
-  const stateText=releaseStatusLabel(presentation);
+  const stateText=release?releaseStatusLabel(presentation):'ILS Release 待同步';
   const openURL=release?.open_url||job.testflight_url||'';
   const source=release?testFlightLinkSource(release):'';
   const link=openURL
    ?'<span class="build-release-action"><a class="testflight-link" href="'+escapeHTML(openURL)+'">在 TestFlight 中打开</a>'+(source?'<span class="release-link-source">'+escapeHTML(source)+'</span>':'')+'</span>'
    :'';
   const detail=release?.status_message||
-   (releaseStatus==='submitted'
+   (!release
+    ?'上传结果已保存，但构建任务尚未关联到 ILS Release；服务会在重启或刷新 App Store Connect 状态时自动修复。'
+    :releaseStatus==='submitted'
     ?'App Store Connect 已接受上传；等待 Apple Processing。'
     :releaseStatus==='processing'
      ?'Apple 正在处理此构建。'

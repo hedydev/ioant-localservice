@@ -1109,6 +1109,11 @@ func (a *App) appStoreConnectRefresh(w http.ResponseWriter, r *http.Request) {
 	if !a.authorized(w, r) {
 		return
 	}
+	reconciled, reconcileErr := a.reconcileTestFlightBuildJobs()
+	if reconcileErr != nil {
+		fail(w, 500, "修复 TestFlight Release 关联失败："+reconcileErr.Error())
+		return
+	}
 	cfg, e := a.readAppStoreConnectConfig()
 	if e != nil {
 		fail(w, 409, "请先配置 App Store Connect API Key")
@@ -1128,7 +1133,7 @@ func (a *App) appStoreConnectRefresh(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	count, refreshErr := a.refreshTestFlightReleases(ctx, cfg)
 	a.recordASCRefresh(refreshErr)
-	response := map[string]any{"updated": count, "status": a.appStoreConnectStatus()}
+	response := map[string]any{"updated": count, "reconciled": reconciled, "status": a.appStoreConnectStatus()}
 	if refreshErr != nil {
 		response["warning"] = refreshErr.Error()
 	}
@@ -1150,10 +1155,175 @@ func (a *App) appStoreConnectBuildEnv() []string {
 	}
 }
 
+func isRecoverableTestFlightJob(job BuildJob) bool {
+	if job.ID == "" || job.ProjectID == "" || job.Result == nil || job.Lane != "ios-testflight" {
+		return false
+	}
+	result := job.Result
+	if result.SchemaVersion != 1 || result.Lane != "ios-testflight" || result.Status != "submitted" || result.Platform != "ios" ||
+		result.Distribution != "app-store-connect" || result.SubmissionResult != "upload-succeeded" ||
+		strings.TrimSpace(result.BundleID) == "" || !validVersion(result.Version) {
+		return false
+	}
+	if _, e := parseBuild(result.Build); e != nil {
+		return false
+	}
+	return result.Architecture == "arm64" && result.Artifact == ""
+}
+
+func (a *App) recoveryProfileForTestFlightJob(job BuildJob) ReleaseProfile {
+	result := job.Result
+	hasSnapshot := job.ReleaseVariant != "" && job.ReleaseChannel != "" && job.ReleaseArchitecture != ""
+	if !hasSnapshot && job.ProfileID != "" {
+		if current, e := a.readReleaseProfile(job.ProjectID, job.ProfileID); e == nil {
+			if current, e = normalizeReleaseProfile(current); e == nil && current.Lane == "ios-testflight" {
+				return current
+			}
+		}
+	}
+
+	architecture := job.ReleaseArchitecture
+	if architecture == "" && result != nil {
+		architecture = result.Architecture
+	}
+	if architecture == "" {
+		architecture = "arm64"
+	}
+	channel := job.ReleaseChannel
+	if channel == "" {
+		channel = "beta"
+	}
+	variant := job.ReleaseVariant
+	if variant == "" {
+		variant = "default"
+	}
+	name := job.Title
+	if name == "" {
+		name = "Recovered iOS TestFlight"
+	}
+	return ReleaseProfile{
+		ID:                         job.ProfileID,
+		Name:                       name,
+		Platform:                   "ios",
+		Architecture:               architecture,
+		Channel:                    channel,
+		Variant:                    variant,
+		Lane:                       "ios-testflight",
+		ResultContract:             "ils-result-v1",
+		Notes:                      job.ReleaseNotes,
+		TestFlightURL:              job.TestFlightURL,
+		TestFlightGroupName:        job.TestFlightGroupName,
+		TestFlightGroupType:        job.TestFlightGroupType,
+		TestFlightCreateGroup:      job.TestFlightCreateGroup,
+		TestFlightSubmitBetaReview: job.TestFlightSubmitBetaReview,
+	}
+}
+
+func containsReleaseID(ids []string, id string) bool {
+	for _, candidate := range ids {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) linkStoredBuildRelease(jobID, projectID, releaseID string) error {
+	if !jobRE.MatchString(jobID) || projectID == "" || releaseID == "" {
+		return fmt.Errorf("构建发布关联参数无效")
+	}
+	a.buildMu.Lock()
+	defer a.buildMu.Unlock()
+	raw, e := os.ReadFile(a.buildJobPath(jobID))
+	if e != nil {
+		return e
+	}
+	var job BuildJob
+	if e = json.Unmarshal(raw, &job); e != nil || job.ProjectID != projectID {
+		return fmt.Errorf("构建任务元数据无效")
+	}
+	if !containsReleaseID(job.ReleaseIDs, releaseID) {
+		job.ReleaseIDs = append(job.ReleaseIDs, releaseID)
+	}
+	if job.Status == "running" && a.activeBuild != job.ID && isRecoverableTestFlightJob(job) {
+		now := time.Now().UTC()
+		job.Status = "succeeded"
+		job.Stage = "submitted"
+		job.StageState = "succeeded"
+		job.Progress = nil
+		job.Message = "已从可信 TestFlight 上传结果恢复 ILS Release 关联；等待 Apple Processing"
+		job.Error = ""
+		job.FinishedAt = &now
+	}
+	return atomicJSON(a.buildJobPath(job.ID), job)
+}
+
+func (a *App) reconcileTestFlightBuildJobs() (int, error) {
+	paths, e := filepath.Glob(filepath.Join(a.data, "builds", "*", "job.json"))
+	if e != nil {
+		return 0, e
+	}
+	repaired := 0
+	var firstErr error
+	jobs := make([]BuildJob, 0, len(paths))
+	for _, path := range paths {
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			if firstErr == nil {
+				firstErr = readErr
+			}
+			continue
+		}
+		var job BuildJob
+		if json.Unmarshal(raw, &job) == nil && isRecoverableTestFlightJob(job) {
+			jobs = append(jobs, job)
+		}
+	}
+	// Process oldest to newest so an idempotent retry of the same Apple build
+	// becomes the Release's current BuildJobID deterministically.
+	sort.SliceStable(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.Before(jobs[j].CreatedAt)
+	})
+	for _, job := range jobs {
+		a.buildMu.Lock()
+		active := a.activeBuild == job.ID
+		a.buildMu.Unlock()
+		if active {
+			continue
+		}
+
+		profile := a.recoveryProfileForTestFlightJob(job)
+		release, publishErr := a.publishTestFlightRelease(job, profile, *job.Result)
+		if publishErr != nil {
+			if firstErr == nil {
+				firstErr = publishErr
+			}
+			continue
+		}
+		wasLinked := containsReleaseID(job.ReleaseIDs, release.ID)
+		if linkErr := a.linkStoredBuildRelease(job.ID, job.ProjectID, release.ID); linkErr != nil {
+			if firstErr == nil {
+				firstErr = linkErr
+			}
+			continue
+		}
+		if !wasLinked {
+			repaired++
+		}
+	}
+	return repaired, firstErr
+}
+
 func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, result BuildResult) (Release, error) {
 	build, e := parseBuild(result.Build)
 	if e != nil {
 		return Release{}, fmt.Errorf("TestFlight build number 无效")
+	}
+	createdAt := time.Now().UTC()
+	if job.FinishedAt != nil && !job.FinishedAt.IsZero() {
+		createdAt = job.FinishedAt.UTC()
+	} else if !job.CreatedAt.IsZero() {
+		createdAt = job.CreatedAt.UTC()
 	}
 	release := Release{
 		Variant:       profile.Variant,
@@ -1165,7 +1335,7 @@ func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, res
 		Architecture:  profile.Architecture,
 		Channel:       profile.Channel,
 		Notes:         profile.Notes,
-		CreatedAt:     time.Now().UTC(),
+		CreatedAt:     createdAt,
 		BundleID:      result.BundleID,
 		Delivery:      "testflight",
 		Status:        "submitted",
@@ -1187,13 +1357,11 @@ func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, res
 	for i := range a.state.Releases {
 		existing := a.state.Releases[i]
 		if existing.ProjectID == release.ProjectID &&
-			existing.Variant == release.Variant &&
 			existing.Version == release.Version &&
 			existing.Build == release.Build &&
 			existing.Platform == release.Platform &&
-			existing.Architecture == release.Architecture &&
-			existing.Channel == release.Channel &&
-			existing.Delivery == "testflight" {
+			existing.Delivery == "testflight" &&
+			(existing.BundleID == "" || release.BundleID == "" || existing.BundleID == release.BundleID) {
 			existing.BundleID = release.BundleID
 			existing.BuildJobID = release.BuildJobID
 			if !oneOf(existing.Status, "submitted", "processing", "available", "unavailable") || existing.StatusMessage == "" {

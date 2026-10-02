@@ -72,7 +72,15 @@ type BuildJob struct {
 	Title         string       `json:"title,omitempty"`
 	Platform      string       `json:"platform,omitempty"`
 	Lane          string       `json:"lane,omitempty"`
-	TestFlightURL string       `json:"testflight_url,omitempty"`
+	ReleaseVariant      string `json:"release_variant,omitempty"`
+	ReleaseChannel      string `json:"release_channel,omitempty"`
+	ReleaseArchitecture string `json:"release_architecture,omitempty"`
+	ReleaseNotes        string `json:"release_notes,omitempty"`
+	TestFlightURL              string `json:"testflight_url,omitempty"`
+	TestFlightGroupName        string `json:"testflight_group_name,omitempty"`
+	TestFlightGroupType        string `json:"testflight_group_type,omitempty"`
+	TestFlightCreateGroup      bool   `json:"testflight_create_group,omitempty"`
+	TestFlightSubmitBetaReview bool   `json:"testflight_submit_beta_review,omitempty"`
 	Status        string       `json:"status"`
 	Stage      string       `json:"stage"`
 	StageState string       `json:"stage_state,omitempty"`
@@ -533,7 +541,15 @@ func (a *App) startBuild(w http.ResponseWriter, r *http.Request) {
 	if profile != nil {
 		j.Platform = profile.Platform
 		j.Lane = profile.Lane
+		j.ReleaseVariant = profile.Variant
+		j.ReleaseChannel = profile.Channel
+		j.ReleaseArchitecture = profile.Architecture
+		j.ReleaseNotes = profile.Notes
 		j.TestFlightURL = profile.TestFlightURL
+		j.TestFlightGroupName = profile.TestFlightGroupName
+		j.TestFlightGroupType = profile.TestFlightGroupType
+		j.TestFlightCreateGroup = profile.TestFlightCreateGroup
+		j.TestFlightSubmitBetaReview = profile.TestFlightSubmitBetaReview
 	}
 	if e = os.MkdirAll(filepath.Dir(a.buildJobPath(j.ID)), 0700); e == nil {
 		if j.Platform != "" {

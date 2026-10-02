@@ -183,6 +183,20 @@ platform
 - TestFlight Release Profile 可配置目标 Group、Internal/External、自动创建 Group、以及显式的 External Beta Review 自动提交。Group 自动化只在正式 Build `processingState=VALID` 后执行；自动化错误独立记录，不会覆盖上传成功历史。
 - 持久低频配置统一采用“页面状态摘要 + 配置/编辑弹框”：当前已把项目来源（目录/发布分支）和 App Store Connect Key 配置从长期展开表单改为 dialog；页面保留刷新/验证等高频动作。状态轮询不得覆盖正在编辑的弹框字段。
 
+### 1.9 TestFlight Release 自动回填（2026-10-02）
+
+修复了“Build Job 显示 TestFlight 上传成功，但 iOS Release 列表为空”的数据链缺口。
+
+- ILS 启动时会扫描持久化 Build Job；只有完整保存了可信 `upload-succeeded` TestFlight result 的任务才可恢复。
+- 缺失的 `delivery=testflight` Release 会自动重建，并把 Release ID 回写到对应 Job 的 `release_ids`。
+- App Store Connect 手动刷新在请求 Apple 前也执行同一 reconciliation，因此无需手工伪造 Release。
+- 新 Build Job 保存必要的 Release Profile 快照，以便 Profile 后续修改/删除后仍能恢复当时发布语义。
+- TestFlight 去重按 Apple app/build 身份收敛，避免相同 Bundle ID + version + build 因 variant/channel 元数据差异产生重复卡片。
+- Build Job UI 如果真的还找不到关联 Release，会明确显示“ILS Release 待同步”，不再把 fallback result card 伪装成已经存在的 Release。
+- 该修复不把上传成功解释为可测试；恢复后的 Release 仍从 `submitted` 开始，后续状态必须由 App Store Connect API 证据推进。
+
+当前实现仍需在用户 Mac 上执行 `go test ./...`、重启 ILS，并确认历史 Sowhat build 224/228 自动出现在 iOS Release 列表。
+
 ## 2. 当前产品语义必须保持
 
 最重要的一条：

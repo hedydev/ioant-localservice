@@ -77,6 +77,17 @@ Because the two sources are stored separately, a later successful Apple refresh 
 
 ## Refresh behavior
 
+Before Apple status can be refreshed, ILS must have a local TestFlight Release record. ILS now reconciles durable Build Job evidence with the Release catalog so an older/interrupted successful upload cannot remain visible only as a Build Job:
+
+- a recoverable job must contain a validated `ios-testflight` result with `status=submitted`, `distribution=app-store-connect`, `submission_result=upload-succeeded`, Bundle ID, semantic version, positive build number, and arm64 architecture;
+- on service startup, missing Release records are rebuilt from that durable result and the Build Job is linked through `release_ids`;
+- the administrator **Refresh Release Status** action runs the same local reconciliation before querying Apple;
+- new Build Jobs persist the relevant Release Profile metadata snapshot (variant/channel/architecture/notes and TestFlight distribution settings), so recovery does not depend on a Profile remaining unchanged;
+- older jobs without a snapshot use the current matching TestFlight Profile when it is still available, otherwise conservative defaults are used;
+- reconciliation is idempotent and identifies a TestFlight Release by the Apple app/build identity, so repeated repair does not create duplicate Release cards.
+
+Only explicit `upload-succeeded` evidence is eligible. A shell exit, partial archive, failed upload, or merely seeing an Apple-related log line is not enough to synthesize a Release.
+
 Release-list access schedules a background refresh at most once every 60 seconds. Submitted/processing releases stay eligible for frequent refresh; terminal available/unavailable releases are checked less often. The current response is not held open while Apple is queried.
 
 An administrator can also run **Refresh Release Status** from the iOS Release page for an immediate refresh. Saving a successfully validated key immediately runs one release-state refresh so the UI does not require a second manual action.

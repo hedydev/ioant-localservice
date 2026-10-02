@@ -143,6 +143,9 @@ func New(data, publicURL string, static fs.FS) (*App, error) {
 	for _, p := range pending {
 		_ = os.Remove(p)
 	}
+	if _, e := a.reconcileTestFlightBuildJobs(); e != nil {
+		return nil, fmt.Errorf("恢复 TestFlight Release 记录失败：%w", e)
+	}
 	return a, nil
 }
 func randomID(n int) string {
