@@ -180,6 +180,8 @@ TLS can also terminate at a local HTTPS reverse proxy while ILS listens only on 
 
 A self-signed certificate must first become fully trusted by the device. Merely trusting an enrollment profile is not sufficient. The current implementation does not automatically create or install a root certificate and does not modify DNS or firewall settings.
 
+For the existing public EC2/Nginx path used for future Ad Hoc OTA distribution, see [docs/ADHOC_OTA_GATEWAY.md](docs/ADHOC_OTA_GATEWAY.md). The repository includes `scripts/deploy-adhoc-ota-gateway.sh`, which can prepare a dedicated Nginx vhost and request a trusted Let's Encrypt certificate through Certbot after the chosen DNS A record points at the EC2 host. The provisioning script does not yet upload IPA/manifest artifacts or rewrite the local ILS `-public-url`.
+
 ## Project and AI automated publishing
 
 Machine-specific Sowhat integration parameters and its build/publish workflow are documented in [SOWHAT_RELEASE_HANDOFF.md](docs/SOWHAT_RELEASE_HANDOFF.md). The reusable workflow is also documented in the hero-skills `publish-localservice-builds` skill. Sowhat is the first integrated project, but the publishing contract is designed for additional projects.

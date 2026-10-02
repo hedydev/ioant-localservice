@@ -269,6 +269,27 @@ platform
 
 仍需用户 Mac 执行 `go test ./...` / `go build` 并重启 ILS 后验证：日志不闪、224/228 不再被整体标为 available、App Icon 不再重复平台徽标、Overview 同时显示 iOS/macOS 最新 Release。
 
+### 1.15 Ad Hoc OTA 公网 HTTPS Gateway 部署脚本（2026-10-02）
+
+新增 `scripts/deploy-adhoc-ota-gateway.sh` 与 `docs/ADHOC_OTA_GATEWAY.md`，用于准备现有新加坡 EC2 上的独立 Nginx/Let's Encrypt OTA 站点。
+
+当前默认目标来自既有开发环境：
+
+- EC2 `52.77.167.119`；
+- SSH user `ubuntu`；
+- 本机 SSH 私钥 `/Users/ted/Documents/workspace/aws-sigapore-v2ray.pem`；
+- EC2 静态根目录 `/srv/ils-adhoc-ota`。
+
+注意：workspace 下的 `.pem` 是 SSH 私钥，不是 HTTPS 证书。公网 TLS 证书由 EC2 上的 Certbot + Let's Encrypt 管理。
+
+脚本支持两阶段部署：
+
+1. `--prepare-only`：仅创建独立 Nginx HTTP vhost/root，不申请证书，适合 DNS 尚未绑定时；
+2. DNS A 记录指向 EC2 后，再带 `--email` 运行：校验 DNS、通过 Certbot Nginx plugin 申请/续用证书、启用 HTTPS redirect，并验证 `/_ils/health`。
+
+脚本不会修改现有 `ioant.com` / V2Ray 站点逻辑；会在覆盖自己的 OTA site config 前备份，并在 reload 前执行 `nginx -t`。本轮只完成 gateway provisioning，尚未把 ILS Ad Hoc Release 的 IPA/manifest 自动同步到 EC2，也不会改写本地 ILS `-public-url`。下一步应在域名确定并真实部署验证后，再设计独立的 artifact publish/sync 步骤。
+
+
 
 
 
