@@ -245,8 +245,8 @@ App Store Connect UI 已从 iOS 主模块中拆出，避免后续 Apple API / Te
 最近一次主分支实现提交：
 
 ```text
-0ffef75e96ea9868ace0d2413de3844b3d0b2882
-Reconcile missing TestFlight releases
+943a302642696b2c40635708d3dba83dec4f455d
+Fix canonical paths in macOS service tests
 ```
 
 提交在既有 TestFlight / App Store Connect 集成上新增：
@@ -259,7 +259,7 @@ Reconcile missing TestFlight releases
 - Build Job 在缺失 Release 时明确显示“ILS Release 待同步”，不再用 fallback card 掩盖数据缺口；
 - 新增历史任务回填、Profile snapshot fallback、拒绝不可信上传结果和 Apple build 去重测试。
 
-**本次改动已做 GitHub 侧静态结构检查，但没有在用户 Mac 上实际执行 `go test ./...`、`go build` 或重启后的真实 state.json / Build Job 回填验证；这些不能记录为通过。**
+**本次改动已做 GitHub 侧静态结构检查。用户随后在 macOS 实际执行 `go test ./...`，编译进入测试阶段，但发现两个与 macOS canonical path 相关的既有测试失败：生成 App Icon 因 `/var → /private/var` 被误判为仓库内 symlink，ASC Team Key env 测试则错误要求未 canonicalize 的临时路径。提交 `943a302642696b2c40635708d3dba83dec4f455d` 已修复：先 canonicalize 可信 repo root、仍拒绝 repo 内 symlink/traversal，并让 ASC 测试按真实 .p8 路径断言。修复后的 `go test ./...` / `go build` 尚待用户 Mac 复跑，不能记录为通过。**
 
 因此下一位接手者首先应该在本机从当前 `main` 开始：
 
