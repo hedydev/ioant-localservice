@@ -197,6 +197,19 @@ platform
 
 当前实现仍需在用户 Mac 上执行 `go test ./...`、重启 ILS，并确认历史 Sowhat build 224/228 自动出现在 iOS Release 列表。
 
+### 1.10 TestFlight 回填诊断与操作反馈（2026-10-02）
+
+用户实测发现历史 Sowhat TestFlight build 224/228 在第一次 reconciliation 修复后仍显示 **ILS Release 待同步**，同时“验证连接 / 刷新发布状态”缺少明显的执行结果反馈。已在 `6ab460af2ca2d015905bd98dbd3daf81434361f1` 继续修复：
+
+- App Store Connect **验证连接**和**刷新发布状态**统一使用固定顶部通知；执行中、成功、警告、失败都有明确状态，并自动消失。
+- Refresh 完成后同时重新读取统一 Release catalog 和 Build Job 列表，避免后端已经修复但页面仍显示旧 `release_ids`。
+- 后端返回 TestFlight reconciliation 报告：TestFlight 任务扫描数、可恢复数、新关联数、已有链接数、运行中数，以及不包含敏感数据的跳过原因计数。
+- 旧 Build Job 顶层 `lane` 为空、旧持久化结果缺 `schema_version` 时不再直接排除；仍要求 result 自身明确为 `ios-testflight` 且 Bundle ID/version/build/distribution 等身份完整。
+- 旧 result 如果还没有 `submission_result` 字段，只有在保存的 `build.log` 中存在结构化 `ILS_EVENT {stage:"upload",state:"succeeded"}` 时才允许回填。普通文本、猜测或等待时间不能作为上传成功证据。
+- 前端刷新通知会直接显示本地 reconciliation 结果和 Apple 状态更新数量；如果仍不能回填，会显示例如“缺少 upload-succeeded 证据”等原因，而不是只显示“待同步”。
+
+这些改动尚未在用户 Mac 上重新执行 `go test ./...` / `go build`，也尚未确认真实 224/228 是否已完成回填，不能写成通过。
+
 ## 2. 当前产品语义必须保持
 
 最重要的一条：
@@ -245,8 +258,8 @@ App Store Connect UI 已从 iOS 主模块中拆出，避免后续 Apple API / Te
 最近一次主分支实现提交：
 
 ```text
-943a302642696b2c40635708d3dba83dec4f455d
-Fix canonical paths in macOS service tests
+6ab460af2ca2d015905bd98dbd3daf81434361f1
+Improve TestFlight repair feedback and legacy recovery
 ```
 
 提交在既有 TestFlight / App Store Connect 集成上新增：
