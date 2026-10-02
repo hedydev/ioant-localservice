@@ -653,6 +653,35 @@ func betaAvailable(state string) bool {
 	return state == "READY_FOR_BETA_TESTING" || state == "IN_BETA_TESTING"
 }
 
+func betaStateLabel(state string) string {
+	switch state {
+	case "READY_FOR_BETA_TESTING":
+		return "Ready for Testing"
+	case "IN_BETA_TESTING":
+		return "Testing"
+	case "READY_FOR_BETA_SUBMISSION":
+		return "Ready to Submit"
+	case "WAITING_FOR_BETA_REVIEW":
+		return "Waiting for Review"
+	case "IN_BETA_REVIEW":
+		return "In Review"
+	case "BETA_APPROVED":
+		return "Approved"
+	case "BETA_REJECTED":
+		return "Rejected"
+	case "MISSING_EXPORT_COMPLIANCE":
+		return "Missing Export Compliance"
+	case "IN_EXPORT_COMPLIANCE_REVIEW":
+		return "Export Compliance Review"
+	case "PROCESSING_EXCEPTION":
+		return "Processing Exception"
+	case "EXPIRED":
+		return "Expired"
+	default:
+		return state
+	}
+}
+
 func testFlightState(processing, internal, external string, expired bool) (string, string) {
 	if expired || internal == "EXPIRED" || external == "EXPIRED" {
 		return "unavailable", "TestFlight 构建已过期"
@@ -664,31 +693,63 @@ func testFlightState(processing, internal, external string, expired bool) (strin
 		return "processing", "Apple 正在 Processing"
 	}
 	if betaAvailable(internal) || betaAvailable(external) {
-		if betaAvailable(internal) && external != "" && !betaAvailable(external) {
-			return "available", "内部 TestFlight 已可测试；外部测试状态：" + external
+		parts := []string{}
+		if internal != "" {
+			parts = append(parts, "Internal Testing: "+betaStateLabel(internal))
 		}
-		return "available", "TestFlight 已可测试"
+		if external != "" {
+			parts = append(parts, "External Testing: "+betaStateLabel(external))
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "TestFlight Ready for Testing")
+		}
+		return "available", strings.Join(parts, " · ")
 	}
 	switch {
 	case internal == "MISSING_EXPORT_COMPLIANCE" || external == "MISSING_EXPORT_COMPLIANCE":
-		return "processing", "等待补充出口合规信息"
+		return "processing", "Missing Export Compliance"
 	case internal == "IN_EXPORT_COMPLIANCE_REVIEW" || external == "IN_EXPORT_COMPLIANCE_REVIEW":
-		return "processing", "Apple 正在审核出口合规信息"
+		return "processing", "Export Compliance Review"
 	case internal == "PROCESSING_EXCEPTION" || external == "PROCESSING_EXCEPTION":
-		return "unavailable", "TestFlight Processing Exception"
+		return "unavailable", "Processing Exception"
 	case external == "BETA_REJECTED":
-		return "unavailable", "外部 TestFlight Beta Review 被拒绝"
+		return "unavailable", "External Testing: Rejected"
 	case external == "WAITING_FOR_BETA_REVIEW":
-		return "processing", "等待 TestFlight Beta Review"
+		return "processing", "External Testing: Waiting for Review"
 	case external == "IN_BETA_REVIEW":
-		return "processing", "TestFlight Beta Review 进行中"
+		return "processing", "External Testing: In Review"
 	case external == "READY_FOR_BETA_SUBMISSION":
-		return "processing", "TestFlight Ready to Submit；尚未进入测试"
+		return "processing", "External Testing: Ready to Submit"
 	case external == "BETA_APPROVED":
-		return "processing", "外部 TestFlight Beta Review 已批准；等待可测试状态"
+		return "processing", "External Testing: Approved"
+	case internal != "":
+		return "processing", "Internal Testing: " + betaStateLabel(internal)
 	default:
-		return "processing", "Apple 已完成二进制处理；等待 TestFlight 可测试状态"
+		return "processing", "Apple 已完成二进制处理；等待 TestFlight 状态"
 	}
+}
+
+func testFlightReleaseNeedsFrequentRefresh(release Release) bool {
+	if release.Status == "submitted" || release.Status == "processing" {
+		return true
+	}
+	if release.TestFlight == nil {
+		return false
+	}
+	switch release.TestFlight.BuildUploadState {
+	case "AWAITING_UPLOAD", "PROCESSING":
+		return true
+	}
+	switch release.TestFlight.ExternalBuildState {
+	case "READY_FOR_BETA_SUBMISSION",
+		"WAITING_FOR_BETA_REVIEW",
+		"IN_BETA_REVIEW",
+		"BETA_APPROVED",
+		"MISSING_EXPORT_COMPLIANCE",
+		"IN_EXPORT_COMPLIANCE_REVIEW":
+		return true
+	}
+	return false
 }
 
 func (r *ascResolver) betaGroup(ctx context.Context, appID string, info *TestFlightReleaseInfo) (ascResource, ascBetaGroupAttributes, bool) {
@@ -1023,7 +1084,8 @@ func (a *App) refreshTestFlightReleases(ctx context.Context, cfg AppStoreConnect
 		if release.Delivery != "testflight" || release.BundleID == "" {
 			continue
 		}
-		if (release.Status == "available" || release.Status == "unavailable") &&
+		if !testFlightReleaseNeedsFrequentRefresh(release) &&
+			(release.Status == "available" || release.Status == "unavailable") &&
 			release.TestFlight != nil && release.TestFlight.LastCheckedAt != nil &&
 			time.Since(*release.TestFlight.LastCheckedAt) < 15*time.Minute {
 			continue
@@ -1032,8 +1094,8 @@ func (a *App) refreshTestFlightReleases(ctx context.Context, cfg AppStoreConnect
 	}
 	a.mu.RUnlock()
 	sort.SliceStable(candidates, func(i, j int) bool {
-		iActive := candidates[i].Status == "submitted" || candidates[i].Status == "processing"
-		jActive := candidates[j].Status == "submitted" || candidates[j].Status == "processing"
+		iActive := testFlightReleaseNeedsFrequentRefresh(candidates[i])
+		jActive := testFlightReleaseNeedsFrequentRefresh(candidates[j])
 		if iActive != jActive {
 			return iActive
 		}

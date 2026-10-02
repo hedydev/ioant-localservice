@@ -204,6 +204,60 @@ func TestBuildUploadState(t *testing.T) {
 	}
 }
 
+func TestBetaStateLabel(t *testing.T) {
+	tests := map[string]string{
+		"READY_FOR_BETA_TESTING":   "Ready for Testing",
+		"IN_BETA_TESTING":          "Testing",
+		"READY_FOR_BETA_SUBMISSION":"Ready to Submit",
+		"WAITING_FOR_BETA_REVIEW":  "Waiting for Review",
+		"IN_BETA_REVIEW":           "In Review",
+		"BETA_APPROVED":            "Approved",
+		"BETA_REJECTED":            "Rejected",
+	}
+	for raw, want := range tests {
+		if got := betaStateLabel(raw); got != want {
+			t.Fatalf("betaStateLabel(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestTestFlightStateInternalReadyExternalReadyToSubmit(t *testing.T) {
+	status, message := testFlightState("VALID", "READY_FOR_BETA_TESTING", "READY_FOR_BETA_SUBMISSION", false)
+	if status != "available" {
+		t.Fatalf("status = %q, want available", status)
+	}
+	const want = "Internal Testing: Ready for Testing · External Testing: Ready to Submit"
+	if message != want {
+		t.Fatalf("message = %q, want %q", message, want)
+	}
+}
+
+func TestTestFlightReleaseNeedsFrequentRefresh(t *testing.T) {
+	now := time.Now().UTC()
+	active := Release{
+		Status: "available",
+		TestFlight: &TestFlightReleaseInfo{
+			BuildUploadState:   "COMPLETE",
+			InternalBuildState: "READY_FOR_BETA_TESTING",
+			ExternalBuildState: "READY_FOR_BETA_SUBMISSION",
+			LastCheckedAt:      &now,
+		},
+	}
+	if !testFlightReleaseNeedsFrequentRefresh(active) {
+		t.Fatal("expected external Ready to Submit release to remain active")
+	}
+	terminal := active
+	terminal.TestFlight = &TestFlightReleaseInfo{
+		BuildUploadState:   "COMPLETE",
+		InternalBuildState: "READY_FOR_BETA_TESTING",
+		ExternalBuildState: "IN_BETA_TESTING",
+		LastCheckedAt:      &now,
+	}
+	if testFlightReleaseNeedsFrequentRefresh(terminal) {
+		t.Fatal("expected external Testing release to use terminal refresh cadence")
+	}
+}
+
 func TestTestFlightState(t *testing.T) {
 	tests := []struct {
 		name       string

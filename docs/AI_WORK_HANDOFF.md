@@ -242,6 +242,23 @@ platform
 
 当前仍需用户 Mac 真实执行 `go test ./...` / `go build`，然后点击“刷新发布状态”确认 Sowhat 228 显示 `Build Upload Processing`，224 不再出现 attributes 解析错误并继续进入 Build/Beta Detail 状态链。
 
+### 1.13 与 App Store Connect TestFlight 状态展示对齐（2026-10-02）
+
+用户实测确认 Sowhat build 224 / 228 均已同步为：Build Upload `COMPLETE`、Internal `READY_FOR_BETA_TESTING`、External `READY_FOR_BETA_SUBMISSION`；App Store Connect 的 build 列表主状态显示 **Ready to Submit**。
+
+本轮进一步收敛：
+
+- Release 和 Build Job 不再用一个线性的“已提交 → Apple Processing → 可测试”控件合并 Internal/External 状态；
+- 统一显示 **Build Upload / Internal Testing / External Testing** 三个独立状态块；
+- Apple enum 映射为 App Store Connect 风格文案，例如 `READY_FOR_BETA_TESTING → Ready for Testing`、`READY_FOR_BETA_SUBMISSION → Ready to Submit`、`WAITING_FOR_BETA_REVIEW → Waiting for Review`；
+- 当 Internal 已 Ready for Testing、External 仍 Ready to Submit 时，顶部主徽标显示 **Ready to Submit**，Internal 状态块仍明确显示 **Ready for Testing**；
+- `Ready to Submit` 使用注意态而不是“已可测试”的绿色终态；
+- Build Job 上传后的状态区复用同一套三块状态；
+- Internal 已 ready 但 External 仍待提交/审核/合规时，Release 继续保持积极 Apple 刷新，不因为整体 `status=available` 就提前进入 15 分钟终态刷新节奏。
+
+仍需在用户 Mac 上执行 `go test ./...` / `go build` 并刷新真实 224/228 页面确认布局与状态一致。
+
+
 
 ## 2. 当前产品语义必须保持
 

@@ -5,20 +5,98 @@ const statusLabels={
  published:'已发布',
  submitted:'已提交到 App Store Connect',
  processing:'Apple Processing',
- available:'TestFlight 可测试',
+ available:'Ready for Testing',
  unavailable:'当前不可测试'
 };
 
+const uploadLabels={
+ AWAITING_UPLOAD:'Awaiting Upload',
+ PROCESSING:'Processing',
+ COMPLETE:'Complete',
+ FAILED:'Failed'
+};
+
+const betaLabels={
+ READY_FOR_BETA_TESTING:'Ready for Testing',
+ IN_BETA_TESTING:'Testing',
+ READY_FOR_BETA_SUBMISSION:'Ready to Submit',
+ WAITING_FOR_BETA_REVIEW:'Waiting for Review',
+ IN_BETA_REVIEW:'In Review',
+ BETA_APPROVED:'Approved',
+ BETA_REJECTED:'Rejected',
+ MISSING_EXPORT_COMPLIANCE:'Missing Export Compliance',
+ IN_EXPORT_COMPLIANCE_REVIEW:'Export Compliance Review',
+ PROCESSING_EXCEPTION:'Processing Exception',
+ EXPIRED:'Expired'
+};
+
+function betaAvailable(state){
+ return state==='READY_FOR_BETA_TESTING'||state==='IN_BETA_TESTING';
+}
+
+function betaLabel(state){
+ return betaLabels[state]||state||'—';
+}
+
+function uploadLabel(state){
+ return uploadLabels[state]||state||'—';
+}
+
+function betaTone(state){
+ if(!state)return 'waiting';
+ if(state==='READY_FOR_BETA_TESTING'||state==='IN_BETA_TESTING')return 'done';
+ if(state==='BETA_REJECTED'||state==='PROCESSING_EXCEPTION'||state==='EXPIRED')return 'failed';
+ if([
+  'READY_FOR_BETA_SUBMISSION',
+  'WAITING_FOR_BETA_REVIEW',
+  'IN_BETA_REVIEW',
+  'BETA_APPROVED',
+  'MISSING_EXPORT_COMPLIANCE',
+  'IN_EXPORT_COMPLIANCE_REVIEW'
+ ].includes(state))return 'attention';
+ return 'active';
+}
+
+function uploadTone(state){
+ if(state==='COMPLETE')return 'done';
+ if(state==='FAILED')return 'failed';
+ if(state==='PROCESSING'||state==='AWAITING_UPLOAD')return 'active';
+ return 'waiting';
+}
+
 export function releaseStatusLabel(release){
  if(release?.delivery==='testflight'){
-  const upload=release.testflight?.build_upload_state;
-  const external=release.testflight?.external_build_state;
-  if(upload==='FAILED')return 'Build Upload Failed';
-  if(upload==='PROCESSING')return 'Build Upload Processing';
-  if(upload==='COMPLETE'&&external==='READY_FOR_BETA_SUBMISSION')return 'Ready to Submit';
-  if(upload==='COMPLETE'&&release.status!=='available'&&release.status!=='unavailable')return 'Build Upload Complete';
+  const info=release.testflight||{};
+  if(info.build_upload_state==='FAILED')return 'Build Upload Failed';
+  if(info.build_upload_state==='PROCESSING')return 'Processing';
+  if(info.build_upload_state==='AWAITING_UPLOAD')return 'Awaiting Upload';
+  if(info.external_build_state)return betaLabel(info.external_build_state);
+  if(info.internal_build_state)return betaLabel(info.internal_build_state);
+  if(info.build_upload_state==='COMPLETE')return 'Complete';
  }
  return statusLabels[release?.status]||release?.status||'已发布';
+}
+
+export function releaseStatusTone(release){
+ if(release?.delivery!=='testflight')return release?.status||'published';
+ const info=release.testflight||{};
+ if(info.build_upload_state==='FAILED')return 'unavailable';
+ if(info.build_upload_state==='PROCESSING'||info.build_upload_state==='AWAITING_UPLOAD')return 'processing';
+ if(info.external_build_state){
+  const tone=betaTone(info.external_build_state);
+  if(tone==='done')return 'available';
+  if(tone==='failed')return 'unavailable';
+  if(tone==='attention')return 'attention';
+  return 'processing';
+ }
+ if(info.internal_build_state){
+  const tone=betaTone(info.internal_build_state);
+  if(tone==='done')return 'available';
+  if(tone==='failed')return 'unavailable';
+  if(tone==='attention')return 'attention';
+ }
+ if(info.build_upload_state==='COMPLETE')return 'available';
+ return release?.status||'submitted';
 }
 
 export function releaseDeliveryLabel(release){
@@ -29,11 +107,12 @@ export function releaseDeliveryLabel(release){
 
 export function releaseInstallNote(release){
  if(release.delivery==='testflight'){
-  const parts=[release.status_message||releaseStatusLabel(release)];
-  if(release.testflight?.build_upload_state)parts.push('Build Upload '+release.testflight.build_upload_state);
-  if(release.testflight?.internal_build_state)parts.push('Internal '+release.testflight.internal_build_state);
-  if(release.testflight?.external_build_state)parts.push('External '+release.testflight.external_build_state);
-  return parts.join(' · ');
+  const info=release.testflight||{};
+  const parts=[];
+  if(info.build_upload_state)parts.push('Build Upload: '+uploadLabel(info.build_upload_state));
+  if(info.internal_build_state)parts.push('Internal Testing: '+betaLabel(info.internal_build_state));
+  if(info.external_build_state)parts.push('External Testing: '+betaLabel(info.external_build_state));
+  return parts.length?parts.join(' · '):(release.status_message||releaseStatusLabel(release));
  }
  if(release.platform!=='ios')return release.architecture+' · macOS';
  const info=release.ios;
@@ -57,37 +136,37 @@ export function testFlightLinkSource(release){
 
 export function testFlightLifecycleView(release,{compact=false}={}){
  if(release?.delivery!=='testflight')return '';
- const status=release.status||'submitted';
- const states=['submitted','processing','available'];
- const labels={submitted:'已提交',processing:'Apple Processing',available:'可测试'};
- const current=states.indexOf(status);
- const buildSeen=Boolean(release.testflight?.apple_build_id);
- const steps=states.map((stage,index)=>{
-  let state='waiting';
-  if(status==='unavailable'){
-   if(index===2)state='failed';
-   else if(index===0||buildSeen)state='done';
-  }else if(current>=0){
-   if(index<current)state='done';
-   else if(index===current)state=status==='available'?'done':'active';
-  }
-  return '<span class="release-lifecycle-step '+state+'">'+escapeHTML(labels[stage])+'</span>';
- }).join('<span class="release-lifecycle-arrow">→</span>');
- const checked=release.testflight?.last_checked_at
-  ?'<span class="release-last-sync">最近同步 '+escapeHTML(formatDate(release.testflight.last_checked_at))+'</span>'
+ const info=release.testflight||{};
+ const uploadState=info.build_upload_state||'';
+ const internalState=info.internal_build_state||'';
+ const externalState=info.external_build_state||'';
+ const uploadText=uploadState?uploadLabel(uploadState):(release.status==='submitted'?'Submitted':'—');
+ const items=[
+  ['Build Upload',uploadText,uploadState?uploadTone(uploadState):(release.status==='submitted'?'active':'waiting')],
+  ['Internal Testing',betaLabel(internalState),betaTone(internalState)],
+  ['External Testing',betaLabel(externalState),betaTone(externalState)]
+ ];
+ const checked=info.last_checked_at
+  ?'<span class="release-last-sync">最近同步 '+escapeHTML(formatDate(info.last_checked_at))+'</span>'
   :'';
- return '<div class="release-lifecycle'+(compact?' compact':'')+'" aria-label="TestFlight 发布状态">'+steps+checked+'</div>';
+ return '<div class="testflight-state-wrap'+(compact?' compact':'')+'" aria-label="App Store Connect TestFlight 状态">'+
+  '<div class="testflight-state-grid">'+items.map(item=>
+   '<span class="testflight-state-item '+item[2]+'"><small>'+escapeHTML(item[0])+'</small><strong>'+escapeHTML(item[1])+'</strong></span>'
+  ).join('')+'</div>'+checked+'</div>';
 }
 
 export function releaseActionsView(release){
  let html='<div class="download-row">';
  if(release.delivery==='testflight'){
+  const info=release.testflight||{};
   if(release.open_url){
    html+='<a class="download" href="'+escapeHTML(release.open_url)+'">在 TestFlight 中打开</a>';
    const source=testFlightLinkSource(release);
    if(source)html+='<span class="release-link-source">'+escapeHTML(source)+'</span>';
-  }else if(release.status==='available'){
-   html+='<span class="meta">构建已可测试；尚未发现 Public Link</span>';
+  }else if(betaAvailable(info.external_build_state)){
+   html+='<span class="meta">External Testing 已可测试；尚未发现 Public Link</span>';
+  }else if(betaAvailable(info.internal_build_state)){
+   html+='<span class="meta">Internal Testing: '+escapeHTML(betaLabel(info.internal_build_state))+' · External Testing: '+escapeHTML(betaLabel(info.external_build_state))+'</span>';
   }else{
    html+='<span class="meta">TestFlight 链接尚未可用</span>';
   }
@@ -106,23 +185,24 @@ export function releaseActionsView(release){
 function releaseDetailsView(release){
  let details='<details><summary>发布信息</summary><p>'+escapeHTML(releaseInstallNote(release))+'</p>';
  if(release.delivery==='testflight'){
+  const info=release.testflight||{};
   details+='<p>'+escapeHTML(release.bundle_id||'')+' · TestFlight</p>';
-  if(release.testflight?.build_upload_state){
+  if(info.build_upload_state){
    const counts=[];
-   if(release.testflight.build_upload_error_count)counts.push(release.testflight.build_upload_error_count+' errors');
-   if(release.testflight.build_upload_warning_count)counts.push(release.testflight.build_upload_warning_count+' warnings');
-   if(release.testflight.build_upload_info_count)counts.push(release.testflight.build_upload_info_count+' infos');
-   details+='<p>Build Upload: '+escapeHTML(release.testflight.build_upload_state)+(counts.length?' · '+escapeHTML(counts.join(' · ')):'')+'</p>';
+   if(info.build_upload_error_count)counts.push(info.build_upload_error_count+' errors');
+   if(info.build_upload_warning_count)counts.push(info.build_upload_warning_count+' warnings');
+   if(info.build_upload_info_count)counts.push(info.build_upload_info_count+' infos');
+   details+='<p>Build Upload: '+escapeHTML(uploadLabel(info.build_upload_state))+' <code>'+escapeHTML(info.build_upload_state)+'</code>'+(counts.length?' · '+escapeHTML(counts.join(' · ')):'')+'</p>';
   }
-  if(release.testflight?.processing_state)details+='<p>Build Processing: '+escapeHTML(release.testflight.processing_state)+'</p>';
-  if(release.testflight?.internal_build_state)details+='<p>Internal Beta: '+escapeHTML(release.testflight.internal_build_state)+'</p>';
-  if(release.testflight?.external_build_state)details+='<p>External Beta: '+escapeHTML(release.testflight.external_build_state)+'</p>';
-  if(release.testflight?.public_link)details+='<p>Public Link: '+escapeHTML(release.testflight.public_link)+'</p>';
-  if(release.testflight?.fallback_url)details+='<p>Profile fallback: '+escapeHTML(release.testflight.fallback_url)+'</p>';
-  if(release.testflight?.target_group_name)details+='<p>TestFlight Group: '+escapeHTML(release.testflight.target_group_name)+' · '+escapeHTML(release.testflight.target_group_type||'internal')+(release.testflight.beta_group_assigned?' · 已关联':'')+'</p>';
-  if(release.testflight?.beta_review_state)details+='<p>Beta Review: '+escapeHTML(release.testflight.beta_review_state)+'</p>';
-  if(release.testflight?.automation_error)details+='<p class="form-error">自动分发：'+escapeHTML(release.testflight.automation_error)+'</p>';
-  if(release.testflight?.last_error)details+='<p class="form-error">'+escapeHTML(release.testflight.last_error)+'</p>';
+  if(info.processing_state)details+='<p>Build Processing: '+escapeHTML(info.processing_state)+'</p>';
+  if(info.internal_build_state)details+='<p>Internal Testing: '+escapeHTML(betaLabel(info.internal_build_state))+' <code>'+escapeHTML(info.internal_build_state)+'</code></p>';
+  if(info.external_build_state)details+='<p>External Testing: '+escapeHTML(betaLabel(info.external_build_state))+' <code>'+escapeHTML(info.external_build_state)+'</code></p>';
+  if(info.public_link)details+='<p>Public Link: '+escapeHTML(info.public_link)+'</p>';
+  if(info.fallback_url)details+='<p>Profile fallback: '+escapeHTML(info.fallback_url)+'</p>';
+  if(info.target_group_name)details+='<p>TestFlight Group: '+escapeHTML(info.target_group_name)+' · '+escapeHTML(info.target_group_type||'internal')+(info.beta_group_assigned?' · 已关联':'')+'</p>';
+  if(info.beta_review_state)details+='<p>Beta Review: '+escapeHTML(info.beta_review_state)+'</p>';
+  if(info.automation_error)details+='<p class="form-error">自动分发：'+escapeHTML(info.automation_error)+'</p>';
+  if(info.last_error)details+='<p class="form-error">'+escapeHTML(info.last_error)+'</p>';
  }else{
   details+='<p>'+escapeHTML(release.filename||'')+'</p><code>SHA-256: '+escapeHTML(release.sha256||'')+'</code>';
   if(release.ios)details+='<p>'+escapeHTML(release.bundle_id)+' · 描述文件包含 '+release.ios.device_count+' 台设备。此信息不代表签名已验证或当前设备获准安装。</p>';
@@ -133,6 +213,7 @@ function releaseDetailsView(release){
 export function renderReleaseCard(release,{featured=false,showDetails=false}={}){
  const platformName=release.platform==='ios'?'iOS':release.platform==='macos'?'macOS':release.platform;
  const status=release.delivery==='testflight'?releaseStatusLabel(release):'已发布';
+ const tone=release.delivery==='testflight'?releaseStatusTone(release):(release.status||'published');
  const meta=[
   'build '+release.build,
   channelNames[release.channel]||release.channel,
@@ -148,11 +229,11 @@ export function renderReleaseCard(release,{featured=false,showDetails=false}={})
      '<div class="meta">'+escapeHTML(meta)+'</div>'+
     '</div>'+
    '</div>'+
-   '<span class="release-status status-'+escapeHTML(release.status||'published')+'">'+escapeHTML(status)+'</span>'+
+   '<span class="release-status status-'+escapeHTML(tone)+'">'+escapeHTML(status)+'</span>'+
   '</div>'+
   '<p class="release-notes">'+escapeHTML(release.notes||'暂无更新说明')+'</p>'+
   testFlightLifecycleView(release)+
-  (release.delivery==='testflight'?'<p class="release-status-message">'+escapeHTML(releaseInstallNote(release))+'</p>':'')+
+  (release.delivery==='testflight'?'<p class="release-status-message">'+escapeHTML(release.status_message||releaseInstallNote(release))+'</p>':'')+
   releaseActionsView(release)+
   (showDetails?releaseDetailsView(release):'')+
  '</article>';

@@ -108,49 +108,59 @@ function resultView(job){
   const detail=release?.status_message||
    (!release
     ?'上传结果已保存，但构建任务尚未关联到 ILS Release；服务会在重启或刷新 App Store Connect 状态时自动修复。'
-    :releaseStatus==='submitted'
-    ?'App Store Connect 已接受上传；等待 Apple Processing。'
-    :releaseStatus==='processing'
-     ?'Apple 正在处理此构建。'
-     :releaseStatus==='available'
-      ?'Apple 状态已确认此构建可用于 TestFlight 测试。'
-      :'Apple 当前状态不允许测试。');
-  return '<div class="submission-result"><strong>iOS 发布</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(stateText)+'</span><small>'+escapeHTML(detail)+'</small>'+testFlightLifecycleView(presentation,{compact:true})+link+'</div>';
+    :'App Store Connect 状态：'+stateText);
+  return '<div class="submission-result"><strong>iOS 发布</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(stateText)+'</span><small>'+escapeHTML(detail)+'</small>'+link+'</div>';
  }
  return '<div class="meta">结果：'+escapeHTML(result.lane||'artifact')+' · '+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</div>';
 }
 
 function pipelineView(job){
+ const lane=laneFor(job);
+ const labels={
+  pull:'拉取',preflight:'预检查',build:'构建',archive:'归档',validate:'验证',
+  export:'导出',package:'打包',notarize:'公证',upload:'上传',publish:'发布',complete:'完成'
+ };
+
+ if(lane==='ios-testflight'){
+  const stages=['pull','preflight','archive','validate','upload'];
+  const terminalStages=['submitted','processing','available','complete'];
+  let current=stages.indexOf(job.stage);
+  if(job.status==='succeeded'||terminalStages.includes(job.stage))current=stages.length;
+  const pipeline='<div class="pipeline" aria-label="构建流水线">'+stages.map((stage,index)=>{
+   let stepState='pending';
+   if(index<current)stepState='done';
+   else if(index===current){
+    if(job.status==='failed'||job.stage_state==='failed')stepState='failed';
+    else if(job.status==='running')stepState='active';
+    else stepState='done';
+   }
+   return '<span class="pipeline-step '+stepState+'">'+escapeHTML(labels[stage]||stage)+'</span>';
+  }).join('<span class="pipeline-arrow">→</span>')+'</div>';
+  const release=linkedRelease(job);
+  const presentation=release||(job.status==='succeeded'
+   ?{delivery:'testflight',status:'submitted',testflight:{}}
+   :null);
+  return pipeline+(presentation?testFlightLifecycleView(presentation,{compact:true}):'');
+ }
+
  const lanes={
-  'ios-testflight':['pull','preflight','archive','validate','upload','submitted','processing','available'],
   'ios-adhoc':['pull','preflight','archive','validate','export','publish','complete'],
   'macos-test':['pull','preflight','build','package','validate','publish','complete'],
   'macos-release':['pull','preflight','build','package','notarize','validate','publish','complete']
  };
- const labels={
-  pull:'拉取',preflight:'预检查',build:'构建',archive:'归档',validate:'验证',
-  export:'导出',package:'打包',notarize:'公证',upload:'上传',publish:'发布',
-  submitted:'已提交到 App Store Connect',processing:'Apple Processing',
-  available:'TestFlight 可测试',complete:'完成'
- };
- const lane=laneFor(job);
  const stages=lanes[lane]||['pull','build','validate','publish','complete'];
- let currentStage=job.stage;
- if(lane==='ios-testflight'&&job.status==='succeeded'&&currentStage==='complete')currentStage='submitted';
- const current=stages.indexOf(currentStage);
+ const current=stages.indexOf(job.stage);
  return '<div class="pipeline" aria-label="构建流水线">'+stages.map((stage,index)=>{
   let stepState='pending';
   if(index<current)stepState='done';
   else if(index===current){
    if(job.status==='failed'||job.stage_state==='failed')stepState='failed';
-   else if(job.status==='running'||(lane==='ios-testflight'&&currentStage==='processing'))stepState='active';
+   else if(job.status==='running')stepState='active';
    else stepState='done';
   }
-  if(lane==='ios-testflight'&&job.status==='succeeded'&&currentStage==='submitted'&&index>current)stepState='waiting';
   return '<span class="pipeline-step '+stepState+'">'+escapeHTML(labels[stage]||stage)+'</span>';
  }).join('<span class="pipeline-arrow">→</span>')+'</div>';
 }
-
 function renderJobs(jobs){
  jobs=[...jobs].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
  if(!jobs.length){

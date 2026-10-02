@@ -61,7 +61,15 @@ ILS maps the evidence into the common Release status:
 | `available` | Internal or external Build Beta Detail reports a beta-testing-ready/testing state |
 | `unavailable` | Apple reports invalid/failed processing, expiration, processing exception, or beta rejection |
 
-The raw Apple fields are also retained under the Release's `testflight` metadata for diagnosis, including `build_upload_state`, Build Upload error/warning/info counts, Build `processing_state`, internal/external beta states, resolved Group information, and Beta Review state. The Release/Build Job badge surfaces Build Upload `PROCESSING / COMPLETE / FAILED` directly so it can be compared with App Store Connect's **Build Uploads** table.
+The raw Apple fields are also retained under the Release's `testflight` metadata for diagnosis, including `build_upload_state`, Build Upload error/warning/info counts, Build `processing_state`, internal/external beta states, resolved Group information, and Beta Review state.
+
+The UI mirrors App Store Connect's TestFlight model as three separate status surfaces instead of collapsing them into one generic "available" step:
+
+- **Build Upload** — Awaiting Upload / Processing / Complete / Failed;
+- **Internal Testing** — for example Ready for Testing / Testing;
+- **External Testing** — for example Ready to Submit / Waiting for Review / In Review / Ready for Testing / Testing.
+
+The primary Release/Build Job badge follows the most relevant Apple-facing build state. For example, when Internal Testing is ready but External Testing is still `READY_FOR_BETA_SUBMISSION`, the badge is **Ready to Submit**, matching App Store Connect, while the Internal Testing cell still shows **Ready for Testing**.
 
 ## TestFlight link
 
@@ -91,7 +99,7 @@ Before Apple status can be refreshed, ILS must have a local TestFlight Release r
 
 Only explicit `upload-succeeded` evidence is eligible. A shell exit, partial archive, failed upload, or merely seeing an Apple-related log line is not enough to synthesize a Release.
 
-Release-list access schedules a background refresh at most once every 60 seconds. Submitted/processing releases stay eligible for frequent refresh; terminal available/unavailable releases are checked less often. The current response is not held open while Apple is queried.
+Release-list access schedules a background refresh at most once every 60 seconds. Submitted/processing releases stay eligible for frequent refresh. A Release whose Internal Testing state is already ready but whose External Testing state is still `READY_FOR_BETA_SUBMISSION`, waiting/in review, approved-but-not-ready, or in export-compliance work also remains in the active refresh set. Only genuinely settled available/unavailable states use the slower terminal refresh cadence. The current response is not held open while Apple is queried.
 
 An administrator can also run **Refresh Release Status** from the iOS Release page for an immediate refresh. The refresh response includes a reconciliation report (`scanned`, `eligible`, `reconciled`, `already_linked`, `active`, and privacy-safe skip-reason counts) so the UI can explain why a historical TestFlight job was or was not repaired. A per-job reconciliation error is reported as a warning and does not block the Apple status query. Startup reconciliation is likewise best-effort: one unreadable historical Job must not prevent ILS itself from starting. Saving a successfully validated key immediately runs one release-state refresh so the UI does not require a second manual action.
 
