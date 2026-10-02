@@ -23,6 +23,7 @@ type Device struct {
 	CollectedAt      time.Time `json:"collected_at"`
 	Status           string    `json:"status"`
 	IdentityVerified bool      `json:"identity_verified"`
+	Source           string    `json:"source,omitempty"`
 }
 
 var udidRE = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{8}-[0-9a-fA-F]{16})$`)
@@ -89,31 +90,42 @@ func (a *App) enrollmentCallback(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "设备 UDID 或登记凭证无效")
 		return
 	}
-	d := Device{UDID: str("UDID"), Product: str("PRODUCT"), Version: str("VERSION"), CollectedAt: time.Now().UTC(), Status: "pending_apple_registration", IdentityVerified: false}
+	d := Device{UDID: str("UDID"), Product: str("PRODUCT"), Version: str("VERSION"), CollectedAt: time.Now().UTC(), Status: "pending_apple_registration", IdentityVerified: false, Source: "local_ils"}
 	a.enrollmentMu.Lock()
 	defer a.enrollmentMu.Unlock()
 	if current, ok := a.enrollments[challenge]; !ok || time.Now().After(current) {
 		fail(w, 410, "登记链接已使用或过期")
 		return
 	}
-	dir := filepath.Join(a.data, "devices")
-	if e = os.MkdirAll(dir, 0700); e != nil {
-		fail(w, 500, "无法保存设备信息")
-		return
-	}
-	hash := sha256.Sum256([]byte(d.UDID))
-	path := filepath.Join(dir, hex.EncodeToString(hash[:])+".json")
-	b, _ := json.Marshal(d)
-	if e = os.WriteFile(path+".tmp", b, 0600); e == nil {
-		e = os.Rename(path+".tmp", path)
-	}
-	if e != nil {
+	if _, e = a.saveDeviceRecord(d); e != nil {
 		fail(w, 500, "设备信息保存失败")
 		return
 	}
 	delete(a.enrollments, challenge)
 	http.Redirect(w, r, a.publicURL+"/?enrollment=collected", http.StatusSeeOther)
 }
+func (a *App) saveDeviceRecord(d Device) (bool, error) {
+	dir := filepath.Join(a.data, "devices")
+	if e := os.MkdirAll(dir, 0700); e != nil {
+		return false, e
+	}
+	hash := sha256.Sum256([]byte(d.UDID))
+	path := filepath.Join(dir, hex.EncodeToString(hash[:])+".json")
+	_, statErr := os.Stat(path)
+	created := os.IsNotExist(statErr)
+	if d.Source == "" {
+		d.Source = "legacy"
+	}
+	b, e := json.Marshal(d)
+	if e != nil {
+		return false, e
+	}
+	if e = os.WriteFile(path+".tmp", b, 0600); e == nil {
+		e = os.Rename(path+".tmp", path)
+	}
+	return created, e
+}
+
 func (a *App) listDevices(w http.ResponseWriter, r *http.Request) {
 	if !a.authorized(w, r) {
 		return

@@ -2,6 +2,9 @@ import {$,state,api,notice,needAdmin} from './core.js';
 import {refreshData} from './projects.js';
 import {renderReleaseCard} from './release-ui.js';
 
+let gatewayConfigured=false;
+let gatewaySyncing=false;
+
 function renderPublicIOS(){
  const releases=state.releases.filter(item=>item.platform==='ios').slice(0,5);
  const container=$('#ios-install-releases');
@@ -23,19 +26,106 @@ async function checkEnrollmentAvailability(){
  try{
   const health=await api('/api/health');
   const link=$('#enroll-device-link');
-  if(health.ota_configured){
+  if(health.public_enrollment_url){
+   link.href=health.public_enrollment_url;
+   link.removeAttribute('aria-disabled');
+   link.classList.remove('disabled-link');
+   $('#enrollment-availability').textContent='公网设备登记已启用。iPhone / iPad 可直接访问 OTA Gateway，不需要和这台 Mac 位于同一局域网。';
+  }else if(health.ota_configured){
    link.href='/api/devices/enroll.mobileconfig';
    link.removeAttribute('aria-disabled');
    link.classList.remove('disabled-link');
-   $('#enrollment-availability').textContent='设备登记入口已启用。请使用 iPhone / iPad 的 Safari 打开此页面并安装登记描述文件。';
+   $('#enrollment-availability').textContent='本地 HTTPS 设备登记入口已启用。请使用 iPhone / iPad 的 Safari 打开此页面并安装登记描述文件。';
   }else{
    link.removeAttribute('href');
    link.setAttribute('aria-disabled','true');
    link.classList.add('disabled-link');
-   $('#enrollment-availability').textContent='当前 ILS 尚未配置受 iPhone 信任的 HTTPS public-url，因此设备登记和网页直接安装暂不可用；请联系管理员先配置 HTTPS。';
+   $('#enrollment-availability').textContent='当前 ILS 尚未配置公网 OTA Gateway 或受 iPhone 信任的本地 HTTPS public-url，因此设备登记暂不可用。';
   }
  }catch(error){
   $('#enrollment-availability').textContent='无法读取设备登记状态：'+error.message;
+ }
+}
+
+function sourceName(source){
+ return source==='public_ota_gateway'?'公网 OTA Gateway':source==='local_ils'?'本地 ILS':'历史登记';
+}
+
+async function loadDevices(){
+ const devices=await api('/api/devices');
+ $('#devices-list').hidden=false;
+ $('#devices-list').textContent=devices.length
+  ?devices.map(device=>
+    device.product+' / iOS '+device.version+
+    '\nUDID: '+device.udid+
+    '\n来源: '+sourceName(device.source)+
+    '\n状态: '+(device.status||'pending_apple_registration')
+   ).join('\n\n')
+  :'还没有收集到设备。';
+}
+
+async function refreshOTAGatewayStatus(){
+ if(!state.admin)return;
+ try{
+  const status=await api('/api/ota-gateway/config');
+  gatewayConfigured=!!status.configured;
+  if(!status.configured){
+   $('#ota-gateway-status').textContent='尚未配置 OTA Gateway。请先运行部署脚本。';
+   return status;
+  }
+  const parts=[
+   status.connected?'已连接':'已配置，尚未验证',
+   status.public_url||'',
+   status.ssh_user&&status.ssh_host?(status.ssh_user+'@'+status.ssh_host):'',
+   status.remote_root||''
+  ].filter(Boolean);
+  if(status.last_error)parts.push('最近错误：'+status.last_error);
+  $('#ota-gateway-status').textContent=parts.join(' · ');
+  return status;
+ }catch(error){
+  gatewayConfigured=false;
+  $('#ota-gateway-status').textContent='无法读取 OTA Gateway 状态：'+error.message;
+  return null;
+ }
+}
+
+async function syncGatewayDevices({silent=false}={}){
+ if(!state.admin||gatewaySyncing)return null;
+ if(!gatewayConfigured){
+  if(!silent)notice('OTA Gateway 尚未配置。','error');
+  return null;
+ }
+ gatewaySyncing=true;
+ const button=$('#ota-sync-devices');
+ if(button)button.disabled=true;
+ try{
+  const report=await api('/api/ota-gateway/sync-devices',{method:'POST'});
+  if(!$('#devices-list').hidden)await loadDevices();
+  await refreshOTAGatewayStatus();
+  if(!silent)notice('公网设备同步完成：待处理 '+report.pending+'，新导入 '+report.imported+'，已确认 '+report.acked+(report.failed?'，失败 '+report.failed:'')+'。');
+  return report;
+ }catch(error){
+  if(!silent)notice(error.message,'error');
+  return null;
+ }finally{
+  gatewaySyncing=false;
+  if(button)button.disabled=false;
+ }
+}
+
+async function syncGatewayArtifacts(){
+ if(!needAdmin())return;
+ if(!gatewayConfigured)return notice('OTA Gateway 尚未配置。','error');
+ const button=$('#ota-sync-artifacts');
+ button.disabled=true;
+ try{
+  const report=await api('/api/ota-gateway/sync-artifacts',{method:'POST'});
+  await refreshData();
+  notice('Ad Hoc OTA 同步完成：成功 '+report.artifacts+(report.failed?'，失败 '+report.failed:'')+'。',report.failed?'error':'info');
+ }catch(error){
+  notice(error.message,'error');
+ }finally{
+  button.disabled=false;
  }
 }
 
@@ -62,10 +152,13 @@ async function pollSigningJob(){
 
 function resetIOS(){
  state.job=null;
+ gatewayConfigured=false;
+ gatewaySyncing=false;
  $('#devices-list').textContent='';
  $('#devices-list').hidden=true;
  $('#sign-state').textContent='';
  $('#sign-button').disabled=false;
+ if($('#ota-gateway-status'))$('#ota-gateway-status').textContent='正在读取 OTA Gateway 配置…';
  renderPublicIOS();
 }
 
@@ -73,13 +166,28 @@ export function initIOS(){
  $('#devices-button').onclick=async()=>{
   if(!needAdmin())return;
   try{
-   const devices=await api('/api/devices');
-   $('#devices-list').hidden=false;
-   $('#devices-list').textContent=devices.length
-    ?devices.map(device=>device.product+' / iOS '+device.version+'\nUDID: '+device.udid+'\n待 Apple 团队登记 · 设备身份尚未认证').join('\n\n')
-    :'还没有收集到设备。';
+   await loadDevices();
   }catch(error){
-   notice(error.message);
+   notice(error.message,'error');
+  }
+ };
+
+ $('#ota-sync-devices').onclick=()=>syncGatewayDevices();
+ $('#ota-sync-artifacts').onclick=()=>syncGatewayArtifacts();
+ $('#ota-gateway-check').onclick=async()=>{
+  if(!needAdmin())return;
+  const button=$('#ota-gateway-check');
+  button.disabled=true;
+  try{
+   const status=await api('/api/ota-gateway/check',{method:'POST'});
+   gatewayConfigured=!!status.configured;
+   await refreshOTAGatewayStatus();
+   notice('OTA Gateway 连接正常。');
+  }catch(error){
+   await refreshOTAGatewayStatus();
+   notice(error.message,'error');
+  }finally{
+   button.disabled=false;
   }
  };
 
@@ -101,10 +209,14 @@ export function initIOS(){
  window.addEventListener('data-refreshed',renderPublicIOS);
  window.addEventListener('project-changed',resetIOS);
  window.addEventListener('admin-cleared',resetIOS);
+ window.addEventListener('admin-loaded',()=>{
+  if(state.view==='ios')refreshOTAGatewayStatus();
+ });
  window.addEventListener('view-changed',event=>{
   if(event.detail.view==='ios'){
    renderPublicIOS();
    checkEnrollmentAvailability();
+   if(state.admin)refreshOTAGatewayStatus();
   }
  });
 
@@ -113,10 +225,16 @@ export function initIOS(){
   pollSigningJob();
  },3000);
 
+ setInterval(()=>{
+  if(document.hidden||!state.admin||state.view!=='ios'||!gatewayConfigured)return;
+  syncGatewayDevices({silent:true});
+ },30000);
+
  if(new URLSearchParams(location.search).get('enrollment')==='collected'){
   notice('设备信息已提交。管理员还需要在 Apple Developer Team 中注册这台设备并重新发布 Ad Hoc 包，之后才能安装。');
  }
 
  renderPublicIOS();
  checkEnrollmentAvailability();
+ if(state.admin)refreshOTAGatewayStatus();
 }

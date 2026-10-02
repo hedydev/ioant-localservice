@@ -124,7 +124,11 @@ export function releaseInstallNote(release){
   unsigned:'未签名 · 不能直接安装',
   'app-store':'App Store 描述文件 · 不支持此处直接安装'
  };
- return (names[info.profile_type]||info.profile_type)+(info.expires_at?' · '+new Date(info.expires_at).toLocaleDateString('zh-CN')+' 到期':'');
+ let text=(names[info.profile_type]||info.profile_type)+(info.expires_at?' · '+new Date(info.expires_at).toLocaleDateString('zh-CN')+' 到期':'');
+ if(release.ota?.status==='synced')text+=' · OTA Gateway 已同步';
+ else if(release.ota?.status==='syncing'||release.ota?.status==='pending')text+=' · OTA Gateway 同步中';
+ else if(release.ota?.status==='failed')text+=' · OTA Gateway 同步失败';
+ return text;
 }
 
 export function testFlightLinkSource(release){
@@ -178,6 +182,10 @@ export function releaseActionsView(release){
   const ext=(release.filename||'artifact').split('.').pop().toUpperCase();
   html+='<a class="download '+(release.install_url?'secondary':'')+'" href="'+escapeHTML(release.download_url)+'">下载 '+escapeHTML(ext)+'</a>';
  }
+ if(release.platform==='ios'&&!release.install_url&&release.ota){
+  if(release.ota.status==='pending'||release.ota.status==='syncing')html+='<span class="meta">正在同步到 OTA Gateway…</span>';
+  if(release.ota.status==='failed')html+='<span class="meta">OTA Gateway 同步失败</span>';
+ }
  html+='<span class="meta">'+formatSize(release.size)+' · '+escapeHTML(release.architecture)+' · '+escapeHTML(release.variant||'default')+'</span></div>';
  return html;
 }
@@ -206,6 +214,11 @@ function releaseDetailsView(release){
  }else{
   details+='<p>'+escapeHTML(release.filename||'')+'</p><code>SHA-256: '+escapeHTML(release.sha256||'')+'</code>';
   if(release.ios)details+='<p>'+escapeHTML(release.bundle_id)+' · 描述文件包含 '+release.ios.device_count+' 台设备。此信息不代表签名已验证或当前设备获准安装。</p>';
+  if(release.ota){
+   details+='<p>OTA Gateway: '+escapeHTML(release.ota.status||'—')+(release.ota.synced_at?' · '+escapeHTML(formatDate(release.ota.synced_at)):'')+'</p>';
+   if(release.ota.public_url)details+='<p>Public OTA: '+escapeHTML(release.ota.public_url)+'</p>';
+   if(release.ota.last_error)details+='<p class="form-error">'+escapeHTML(release.ota.last_error)+'</p>';
+  }
  }
  return details+'</details>';
 }

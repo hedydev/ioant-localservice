@@ -334,6 +334,33 @@ bash: line 7: $5: unbound variable
 
 该首页修复仍需用户重新运行真实 EC2 部署确认。
 
+### 1.18 Public Device Enrollment + OTA Artifact Sync（2026-10-03）
+
+在已经真实跑通的 `https://ota.ioant.com` Nginx + Let's Encrypt 基础上，新增通用 OTA Gateway 模块；不是 Sowhat 专用，所有 ILS 项目共用同一服务级 Gateway 配置。
+
+实现边界：
+
+- 新增 `cmd/ota-gateway`：仅监听 EC2 `127.0.0.1:8790`，由 Nginx 暴露必要公网路径；
+- `GET /enroll` + one-time `.mobileconfig` 提供公网设备登记；
+- challenge 为随机 24-byte hex，15 分钟失效、成功一次后立即失效；
+- iOS callback 最大 1 MiB；使用 `openssl cms -verify -inform DER -noverify` 校验 CMS 内容完整性，但仍不声称 Apple 设备身份已验证；
+- EC2 pending device 保存在 `/var/lib/ils-ota-gateway/devices`，不在 Nginx static root；
+- `/api/ils/*` 使用独立随机 bearer token，仅供本地 ILS 主动 HTTPS pull/ack；
+- 公网设备同步进入**现有** `.localservice/devices/` Device Registry，标记 `source=public_ota_gateway`；本地登记标记 `source=local_ils`；
+- 设备仍保持 `identity_verified=false` / `pending_apple_registration`，不会自动消耗 Apple Device slot，也不会伪装成已经进入 Ad Hoc profile；
+- Ad Hoc/Enterprise iOS Release 本地持久化后，再独立执行 OTA artifact sync；EC2 网络失败不会回滚本地 Release；
+- Release 新增 `ota.status=pending|syncing|synced|failed`，失败可从 Web 重试；
+- OTA artifact 使用 `/releases/<project>/<opaque-release-id>/app.ipa + manifest.plist`，避免按 version/build 直接枚举；
+- manifest 引用 EC2 公网 IPA；同步完成并 HEAD 验证通过后才生成公网 `itms-services://` install action；
+- TestFlight Release 不进入 OTA artifact sync；
+- 部署脚本现在会 cross-build Gateway、安装 systemd 服务、生成/同步 bearer token、更新 Nginx、保留 Certbot，并在本机写 `.localservice/ota-gateway.json`；
+- iOS Web 页新增 Gateway 状态、验证、同步公网设备、同步/重试 Ad Hoc 发布；设备列表显示来源。
+
+当前公网静态 HTTPS 基础（DNS / Let's Encrypt / Nginx health）此前由用户真实验证成功；**本节新增的 Gateway daemon、Public Device Enrollment、ILS device pull、真实 Ad Hoc IPA artifact sync 尚未在用户 EC2/iPhone 上实际验证**，不得记录为通过。
+
+本轮由于执行环境无法解析 GitHub host，未能在独立容器 clone repo 后真实执行 `go test ./...`；已做 GitHub 文件级静态复核并新增 OTA manifest/install URL、Device Registry source、Gateway plist/challenge 回归测试。最终提交后用户必须在 Mac 上真实执行测试、重新部署 Gateway、重启 ILS，再进行真机验证。
+
+
 
 
 

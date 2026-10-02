@@ -140,10 +140,24 @@
     </article>
 
     <article class="panel-card" data-admin hidden>
-      <div class="section-heading"><div><h2>设备管理</h2><span class="meta">管理员</span></div></div>
-      <p>这里会显示收集到的完整 UDID，仅管理员可见。</p>
-      <button id="devices-button" type="button">查看待登记设备</button>
+      <div class="section-heading"><div><h2>设备管理</h2><span class="meta">管理员 · 全局 Device Registry</span></div></div>
+      <p>这里会显示本地登记与公网 OTA Gateway 同步回来的完整 UDID，仅管理员可见。</p>
+      <div class="persistent-config-actions">
+        <button id="devices-button" type="button">查看登记设备</button>
+        <button id="ota-sync-devices" type="button">同步公网设备</button>
+      </div>
       <pre id="devices-list" hidden></pre>
+    </article>
+
+    <article class="panel-card" data-admin hidden>
+      <div class="section-heading"><div><h2>OTA Gateway</h2><span class="meta">管理员 · 全项目通用</span></div></div>
+      <p>Public Device Enrollment 与 Ad Hoc Artifact Sync 共用同一个公网 Gateway；ILS 主动拉取设备，IPA/manifest 通过 SSH 同步到 Gateway。</p>
+      <div id="ota-gateway-status" role="status">正在读取 OTA Gateway 配置…</div>
+      <div class="persistent-config-actions">
+        <button id="ota-gateway-check" type="button">验证 Gateway</button>
+        <button id="ota-sync-artifacts" type="button">同步 Ad Hoc 发布</button>
+      </div>
+      <p class="meta">Gateway 属于 ILS 服务级配置，不属于当前项目。部署脚本会写入本机 <code>.localservice/ota-gateway.json</code>，sync token 不会返回到浏览器。</p>
     </article>
 
     <article class="panel-card" data-admin hidden>

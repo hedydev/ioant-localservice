@@ -53,6 +53,7 @@ type Release struct {
 	OpenURL       string                 `json:"open_url,omitempty"`
 	BuildJobID    string                 `json:"build_job_id,omitempty"`
 	TestFlight    *TestFlightReleaseInfo `json:"testflight,omitempty"`
+	OTA           *OTAReleaseInfo        `json:"ota,omitempty"`
 	DownloadURL   string                 `json:"download_url,omitempty"`
 	InstallURL    string                 `json:"install_url,omitempty"`
 	AppIconURL    string                 `json:"app_icon_url,omitempty"`
@@ -85,6 +86,12 @@ type App struct {
 	signingBusy    bool
 	enrollmentMu   sync.Mutex
 	enrollments    map[string]time.Time
+	otaMu          sync.Mutex
+	otaConnected   bool
+	otaSyncing     bool
+	otaLastCheckAt *time.Time
+	otaLastError   string
+	otaArtifactMu  sync.Mutex
 }
 
 var slugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
@@ -147,6 +154,7 @@ func New(data, publicURL string, static fs.FS) (*App, error) {
 	// not prevent ILS from starting; the manual ASC refresh surfaces the same
 	// reconciliation error together with privacy-safe skip diagnostics.
 	_, _ = a.reconcileTestFlightBuildJobs()
+	go a.reconcileOTAGatewayArtifacts()
 	return a, nil
 }
 func randomID(n int) string {
@@ -203,7 +211,13 @@ func (a *App) Handler() http.Handler {
 		respond(w, http.StatusOK, map[string]any{"authenticated": true, "role": "admin"})
 	})
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		respond(w, 200, map[string]any{"status": "ok", "ota_configured": a.publicURL != "", "max_upload_bytes": maxUpload})
+		respond(w, 200, map[string]any{
+			"status":                    "ok",
+			"ota_configured":            a.publicURL != "",
+			"ota_gateway_configured":    a.otaGatewayConfigured(),
+			"public_enrollment_url":     a.otaGatewayEnrollmentURL(),
+			"max_upload_bytes":          maxUpload,
+		})
 	})
 	mux.HandleFunc("GET /api/projects", func(w http.ResponseWriter, r *http.Request) {
 		a.mu.RLock()
@@ -224,6 +238,11 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/devices/enroll.mobileconfig", a.enrollmentProfile)
 	mux.HandleFunc("POST /api/devices/callback/{challenge}", a.enrollmentCallback)
 	mux.HandleFunc("GET /api/devices", a.listDevices)
+	mux.HandleFunc("GET /api/ota-gateway/config", a.otaGatewayConfig)
+	mux.HandleFunc("POST /api/ota-gateway/check", a.otaGatewayCheck)
+	mux.HandleFunc("POST /api/ota-gateway/sync-devices", a.otaGatewaySyncDevices)
+	mux.HandleFunc("POST /api/ota-gateway/sync-artifacts", a.otaGatewaySyncArtifacts)
+	mux.HandleFunc("POST /api/releases/{release}/ota-sync", a.otaGatewaySyncRelease)
 	mux.HandleFunc("GET /api/projects/{project}/build-source", a.buildSource)
 	mux.HandleFunc("POST /api/local/select-folder", a.selectFolder)
 	mux.HandleFunc("GET /api/local/apple-signing-teams", a.appleSigningTeams)
@@ -317,8 +336,12 @@ func (a *App) decorated(v Release) Release {
 	if _, e := os.Stat(a.releaseIconPath(v.ID)); e == nil {
 		v.AppIconURL = "/api/releases/" + v.ID + "/icon"
 	}
-	if v.Delivery == "artifact" && a.publicURL != "" && v.IOS != nil && v.IOS.OTAEligible() {
-		v.InstallURL = "itms-services://?action=download-manifest&url=" + url.QueryEscape(a.publicURL+"/api/releases/"+v.ID+"/manifest.plist")
+	if v.Delivery == "artifact" && v.IOS != nil && v.IOS.OTAEligible() {
+		if v.OTA != nil && v.OTA.Status == "synced" && v.OTA.ManifestURL != "" {
+			v.InstallURL = otaInstallURL(v.OTA.ManifestURL)
+		} else if a.publicURL != "" {
+			v.InstallURL = "itms-services://?action=download-manifest&url=" + url.QueryEscape(a.publicURL+"/api/releases/"+v.ID+"/manifest.plist")
+		}
 	}
 	return v
 }
@@ -477,6 +500,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "version / build 与 IPA 内的版本不一致")
 			return
 		}
+		v.OTA = a.pendingOTAGatewayInfo(v)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -487,6 +511,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 					a.snapshotReleaseIcon(x, temp)
 				}
 				a.recordBuildPublication(fields["job_id"], id, x.ID)
+				go a.scheduleOTAGatewaySync(x.ID)
 				respond(w, 200, a.decorated(x))
 				return
 			}
@@ -510,6 +535,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	a.state = next
 	a.recordBuildPublication(fields["job_id"], id, v.ID)
+	go a.scheduleOTAGatewaySync(v.ID)
 	respond(w, 201, a.decorated(v))
 }
 func oneOf(s string, choices ...string) bool {
@@ -622,5 +648,5 @@ func (a *App) manifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>%s</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>%s</string><key>bundle-version</key><string>%s</string><key>kind</key><string>software</string><key>title</key><string>%s</string></dict></dict></array></dict></plist>`, escapeXML(a.publicURL+"/api/releases/"+v.ID+"/download"), escapeXML(v.BundleID), escapeXML(v.IOS.Build), escapeXML(v.ProjectID+" "+v.Version))
+	_, _ = io.WriteString(w, otaManifestXML(v, a.publicURL+"/api/releases/"+v.ID+"/download"))
 }

@@ -156,15 +156,16 @@ Re-signing the same version and build can produce a different binary. If a diffe
 
 ## Self-service device enrollment
 
-1. Configure HTTPS as described below, then open ILS in Safari on the iPhone or iPad.
-2. Select **Enroll this iPhone / iPad** to download `localservice-device.mobileconfig`.
-3. In iOS, open **Settings -> General -> VPN & Device Management** and approve the profile. The profile contains no MDM payload, root certificate, SCEP configuration, or signing capability. It only requests the UDID, product model, and operating system version, and it may appear as unsigned.
-4. iOS sends the device information back to ILS. An administrator can enter the release token, open the pending device list, and copy the UDID into Apple Developer Devices.
-5. Update the Ad Hoc provisioning profile, request a new Mac signing job, and install the newly published build from the distribution page.
+ILS supports two enrollment entry points that feed the **same local Device Registry**:
 
-Enrollment challenges expire after 15 minutes and can be used only once. Device records are stored in the restricted local `devices/` directory. Public project and release APIs never expose UDIDs.
+- local enrollment through the ILS `public-url`, for LAN/VPN deployments;
+- public enrollment through the shared EC2 OTA Gateway, for devices that cannot reach the Mac directly.
 
-ILS validates the signature of the returned CMS payload, but **does not currently validate the Apple device certificate chain**. Device records therefore remain `identity_verified: false` and `pending_apple_registration`. An administrator must verify the device before consuming an Apple device slot or trusting the record for signing decisions. Physical-device profile installation, redirects, and OTA installation still require manual validation.
+When the OTA Gateway is configured, the iOS page points **Enroll this iPhone / iPad** to the Gateway's public `/enroll` page. The user downloads the one-time `.mobileconfig`, installs it from iOS Settings, and iOS sends UDID, product model and OS version back to the Gateway. The Gateway temporarily stores the pending device outside its public static directory. Local ILS then pulls the record over an authenticated HTTPS sync API and writes it into the existing `.localservice/devices/` registry. The Web UI shows whether the record came from `local_ils` or `public_ota_gateway`.
+
+Enrollment challenges expire after 15 minutes and can be used only once. The profile contains no MDM payload, root certificate, SCEP configuration, or signing capability. Public project/release APIs never expose UDIDs, and the Gateway sync token is never returned to the browser.
+
+Both enrollment paths verify CMS content integrity but **do not currently validate the Apple device certificate chain**. Device records therefore remain `identity_verified: false` and `pending_apple_registration`. An administrator must still register the UDID with the correct Apple Developer Team and regenerate/update the Ad Hoc provisioning profile before a new build can install on that device.
 
 ## HTTPS
 
@@ -180,7 +181,7 @@ TLS can also terminate at a local HTTPS reverse proxy while ILS listens only on 
 
 A self-signed certificate must first become fully trusted by the device. Merely trusting an enrollment profile is not sufficient. The current implementation does not automatically create or install a root certificate and does not modify DNS or firewall settings.
 
-For the existing public EC2/Nginx path used for future Ad Hoc OTA distribution, see [docs/ADHOC_OTA_GATEWAY.md](docs/ADHOC_OTA_GATEWAY.md). The repository includes `scripts/deploy-adhoc-ota-gateway.sh`, which can prepare a dedicated Nginx vhost and request a trusted Let's Encrypt certificate through Certbot after the chosen DNS A record points at the EC2 host. The provisioning script does not yet upload IPA/manifest artifacts or rewrite the local ILS `-public-url`.
+For the shared public EC2/Nginx OTA path, see [docs/ADHOC_OTA_GATEWAY.md](docs/ADHOC_OTA_GATEWAY.md). `scripts/deploy-adhoc-ota-gateway.sh` now deploys the private `cmd/ota-gateway` service behind Nginx, provisions Public Device Enrollment, creates the ILS↔Gateway sync credential, writes the local `.localservice/ota-gateway.json`, and preserves Certbot/Let's Encrypt HTTPS. Eligible Ad Hoc/Enterprise iOS Releases are synchronized from local ILS to the Gateway as `app.ipa + manifest.plist`; TestFlight Releases are never copied into this path. The local `-public-url` remains independent and is not rewritten.
 
 ## Project and AI automated publishing
 
@@ -236,6 +237,11 @@ Artifact Release API responses return a relative `download_url`; clients should 
 | `GET /api/devices/enroll.mobileconfig` | Generate a one-time device information enrollment profile | None |
 | `POST /api/devices/callback/{challenge}` | Receive the iOS CMS device callback | One-time challenge |
 | `GET /api/devices` | Read the pending device UDID list | Bearer |
+| `GET /api/ota-gateway/config` | Read service-level OTA Gateway status; no token/key contents | Bearer |
+| `POST /api/ota-gateway/check` | Verify Gateway HTTPS and authenticated sync endpoint | Bearer |
+| `POST /api/ota-gateway/sync-devices` | Pull pending public-enrollment devices into the local Device Registry and acknowledge them | Bearer |
+| `POST /api/ota-gateway/sync-artifacts` | Retry all eligible unsynchronized Ad Hoc/Enterprise iOS Releases | Bearer |
+| `POST /api/releases/{id}/ota-sync` | Retry one eligible Release's OTA artifact synchronization | Bearer |
 
 Example update check:
 

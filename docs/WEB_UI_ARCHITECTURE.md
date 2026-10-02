@@ -219,3 +219,23 @@ The private key stays on disk. Browser/API responses may show its path and file 
 The iOS administrator panel presents Team vs Individual key type, connection/refresh state, last check time, and the effective upload-auth route. Team keys can be injected into `xcodebuild`; Individual keys remain status-query credentials while upload uses the signed-in Xcode account. Saving a connected key triggers one immediate TestFlight status refresh; the panel then polls only the local config/status endpoint every 10 seconds while visible.
 
 Public release-list reads may schedule a rate-limited background TestFlight refresh when a valid App Store Connect configuration exists. Network refresh does not block the current release-list response.
+
+
+## Public OTA Gateway
+
+The iOS workspace treats the public OTA Gateway as **service-level infrastructure**, not project configuration.
+
+The page exposes one shared gateway state for all projects:
+
+- public enrollment URL;
+- Gateway connectivity;
+- manual pending-device synchronization;
+- manual Ad Hoc artifact synchronization.
+
+The existing local Device Registry remains authoritative. Public enrollment does not create a second device list: records pulled from the Gateway are stored in the same `.localservice/devices/` directory with `source=public_ota_gateway`. Local Profile Service enrollment uses `source=local_ils`.
+
+The public enrollment action prefers the Gateway URL returned by `GET /api/health`. If no Gateway is configured but the local ILS has a trusted HTTPS `public-url`, the existing local enrollment path remains the fallback.
+
+Ad Hoc Release cards share the normal Release renderer. OTA transport state is attached to the Release as `ota.status = pending | syncing | synced | failed`. The browser-install action appears only when the backend reports a synchronized manifest URL (or the legacy local HTTPS path is available). TestFlight cards never use the OTA artifact state.
+
+Admin Gateway operations use the standard top-page notice system for running/success/failure feedback. The sync token and SSH private-key contents must never be returned to browser JavaScript.
