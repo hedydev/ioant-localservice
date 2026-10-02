@@ -82,18 +82,18 @@ Before Apple status can be refreshed, ILS must have a local TestFlight Release r
 - a current recoverable job must contain an `ios-testflight` result with `status=submitted`, `distribution=app-store-connect`, Bundle ID, semantic version, positive build number, and arm64 architecture;
 - current results use `submission_result=upload-succeeded` as the primary durable upload-success evidence;
 - legacy jobs may omit the top-level Job lane or the persisted result schema version; those fields are tolerated only when the result itself still identifies the `ios-testflight` lane and all release identity fields remain valid;
-- a legacy result that predates persisted `submission_result` is recoverable only when the job's saved `build.log` contains a valid structured `ILS_EVENT` with `stage=upload` and `state=succeeded`; free-form log text is not enough;
+- a legacy result that predates persisted `submission_result` is recoverable only when the job's saved `build.log` contains a valid structured `ILS_EVENT` with `stage=upload` and `state=succeeded`; free-form log text is not enough. Because Xcode logs can be multi-megabyte, ILS inspects a bounded tail of the log instead of rejecting the whole log by size;
 - on service startup, missing Release records are rebuilt from that durable result and the Build Job is linked through `release_ids`;
 - the administrator **Refresh Release Status** action runs the same local reconciliation before querying Apple;
 - new Build Jobs persist the relevant Release Profile metadata snapshot (variant/channel/architecture/notes and TestFlight distribution settings), so recovery does not depend on a Profile remaining unchanged;
 - older jobs without a snapshot use the current matching TestFlight Profile when it is still available, otherwise conservative defaults are used;
-- reconciliation is idempotent and identifies a TestFlight Release by the Apple app/build identity, so repeated repair does not create duplicate Release cards.
+- reconciliation is idempotent and identifies a TestFlight Release by the Apple app/build identity, so repeated repair does not create duplicate Release cards or orphan Release icon snapshots.
 
 Only explicit `upload-succeeded` evidence is eligible. A shell exit, partial archive, failed upload, or merely seeing an Apple-related log line is not enough to synthesize a Release.
 
 Release-list access schedules a background refresh at most once every 60 seconds. Submitted/processing releases stay eligible for frequent refresh; terminal available/unavailable releases are checked less often. The current response is not held open while Apple is queried.
 
-An administrator can also run **Refresh Release Status** from the iOS Release page for an immediate refresh. The refresh response includes a reconciliation report (`scanned`, `eligible`, `reconciled`, `already_linked`, `active`, and privacy-safe skip-reason counts) so the UI can explain why a historical TestFlight job was or was not repaired. Saving a successfully validated key immediately runs one release-state refresh so the UI does not require a second manual action.
+An administrator can also run **Refresh Release Status** from the iOS Release page for an immediate refresh. The refresh response includes a reconciliation report (`scanned`, `eligible`, `reconciled`, `already_linked`, `active`, and privacy-safe skip-reason counts) so the UI can explain why a historical TestFlight job was or was not repaired. A per-job reconciliation error is reported as a warning and does not block the Apple status query. Startup reconciliation is likewise best-effort: one unreadable historical Job must not prevent ILS itself from starting. Saving a successfully validated key immediately runs one release-state refresh so the UI does not require a second manual action.
 
 The browser shows Verify/Refresh results as a fixed top notification. Refresh reloads both Release data and Build Job data after the server reconciliation, preventing an already-repaired Release from remaining visually stuck behind stale job state.
 

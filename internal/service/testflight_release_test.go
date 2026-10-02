@@ -435,6 +435,71 @@ func TestReconcileTestFlightBuildJobsAcceptsLegacyMissingTopLevelLaneAndSchema(t
 	}
 }
 
+func TestReconcileTestFlightBuildJobsReadsUploadEvidenceFromLargeLogTail(t *testing.T) {
+	data := t.TempDir()
+	a := &App{
+		data: data,
+		state: state{
+			Projects: []Project{{ID: "demo", Name: "Demo"}},
+			Releases: []Release{},
+		},
+	}
+	job := BuildJob{
+		ID:        "88888888888888888888888888888888",
+		ProjectID: "demo",
+		Lane:      "ios-testflight",
+		Status:    "succeeded",
+		Result: &BuildResult{
+			Lane:         "ios-testflight",
+			Status:       "submitted",
+			Platform:     "ios",
+			Version:      "0.1.0",
+			Build:        "228",
+			Architecture: "arm64",
+			BundleID:     "com.ioant.sowhat",
+			Distribution: "app-store-connect",
+		},
+	}
+	path := a.buildJobPath(job.ID)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicJSON(path, job); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(filepath.Dir(path), "build.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := make([]byte, 64<<10)
+	for i := range chunk {
+		chunk[i] = 'x'
+	}
+	chunk[len(chunk)-1] = '\n'
+	for i := 0; i < 48; i++ {
+		if _, err := logFile.Write(chunk); err != nil {
+			_ = logFile.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := logFile.WriteString("ILS_EVENT {\"stage\":\"upload\",\"state\":\"succeeded\",\"message\":\"Upload accepted\"}\n"); err != nil {
+		_ = logFile.Close()
+		t.Fatal(err)
+	}
+	if err := logFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := a.reconcileTestFlightBuildJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Reconciled != 1 || len(a.state.Releases) != 1 {
+		t.Fatalf("large-log legacy recovery failed: report=%#v releases=%d", report, len(a.state.Releases))
+	}
+}
+
 func TestReconcileReportExplainsMissingUploadEvidence(t *testing.T) {
 	data := t.TempDir()
 	a := &App{
@@ -526,3 +591,71 @@ func TestPublishTestFlightReleaseDedupesByAppleBuildIdentity(t *testing.T) {
 		t.Fatalf("latest retry was not retained as build_job_id: %q", a.state.Releases[0].BuildJobID)
 	}
 }
+
+func TestPublishTestFlightReleaseDoesNotLeakIconOnDedupe(t *testing.T) {
+	data := t.TempDir()
+	a := &App{
+		data: data,
+		state: state{
+			Projects: []Project{{ID: "demo", Name: "Demo"}},
+			Releases: []Release{},
+		},
+	}
+	iconPath := a.projectIconPath("demo", "ios")
+	if err := os.MkdirAll(filepath.Dir(iconPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00}
+	if err := os.WriteFile(iconPath, png, 0600); err != nil {
+		t.Fatal(err)
+	}
+	result := BuildResult{
+		SchemaVersion:    1,
+		Lane:             "ios-testflight",
+		Status:           "submitted",
+		Platform:         "ios",
+		Version:          "4.0.0",
+		Build:            "20",
+		Architecture:     "arm64",
+		BundleID:         "com.example.icon-dedupe",
+		Distribution:     "app-store-connect",
+		SubmissionResult: "upload-succeeded",
+	}
+	profile := ReleaseProfile{Variant: "default", Channel: "beta", Architecture: "arm64"}
+	first, err := a.publishTestFlightRelease(
+		BuildJob{ID: "99999999999999999999999999999999", ProjectID: "demo"},
+		profile,
+		result,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.publishTestFlightRelease(
+		BuildJob{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ProjectID: "demo"},
+		profile,
+		result,
+	); err != nil {
+		t.Fatal(err)
+	}
+	icons, err := filepath.Glob(filepath.Join(data, "release-icons", "*.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(icons) != 1 || filepath.Base(icons[0]) != first.ID+".png" {
+		t.Fatalf("release icon snapshots = %#v, want only %s.png", icons, first.ID)
+	}
+}
+
+func TestNewToleratesHistoricalReconciliationReadFailure(t *testing.T) {
+	data := t.TempDir()
+	badJob := filepath.Join(data, "builds", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "job.json")
+	if err := os.MkdirAll(badJob, 0700); err != nil {
+		t.Fatal(err)
+	}
+	app, err := New(data, "", os.DirFS(t.TempDir()))
+	if err != nil {
+		t.Fatalf("New failed because a historical job could not be read: %v", err)
+	}
+	app.StopBuild()
+}
+

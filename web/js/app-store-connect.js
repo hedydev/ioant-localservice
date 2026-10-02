@@ -101,9 +101,12 @@ async function refreshStatus({announce=true}={}){
   if(announce){
    const local=reconciliationSummary(result.reconciliation);
    const apple='Apple 状态更新 '+result.updated+' 条';
-   const message=[local,apple,result.warning?'部分 Apple 查询失败：'+result.warning:''].filter(Boolean).join('；');
+   const repairWarning=result.reconciliation_warning?'本地回填部分失败：'+result.reconciliation_warning:'';
+   const appleWarning=result.warning?'部分 Apple 查询失败：'+result.warning:'';
+   const message=[local,apple,repairWarning,appleWarning].filter(Boolean).join('；');
    const skipped=Object.values(result.reconciliation?.skipped||{}).reduce((sum,count)=>sum+count,0);
-   notice(message,result.warning?'warning':(result.reconciled>0?'success':(skipped>0?'warning':'success')),7000);
+   const warned=Boolean(result.reconciliation_warning||result.warning||skipped>0);
+   notice(message,warned?'warning':'success',7000);
   }
   return result;
  }catch(error){
@@ -131,9 +134,10 @@ async function saveConfig(form){
    $('#asc-dialog').close();
    try{
     const result=await refreshStatus({announce:false});
-    notice(result.warning
-     ?'App Store Connect API 已连接；发布状态已刷新，但部分查询失败：'+result.warning
-     :'App Store Connect API 已连接，并已同步 TestFlight 发布状态。',result.warning?'warning':'success',6500);
+    const warning=result.reconciliation_warning||result.warning;
+    notice(warning
+     ?'App Store Connect API 已连接；发布状态已刷新，但存在警告：'+warning
+     :'App Store Connect API 已连接，并已同步 TestFlight 发布状态。',warning?'warning':'success',6500);
    }catch{
     notice('App Store Connect API 已连接，但发布状态同步失败；请查看状态。','warning',6500);
    }

@@ -1110,10 +1110,6 @@ func (a *App) appStoreConnectRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reconciliation, reconcileErr := a.reconcileTestFlightBuildJobs()
-	if reconcileErr != nil {
-		fail(w, 500, "修复 TestFlight Release 关联失败："+reconcileErr.Error())
-		return
-	}
 	cfg, e := a.readAppStoreConnectConfig()
 	if e != nil {
 		fail(w, 409, "请先配置 App Store Connect API Key")
@@ -1138,6 +1134,9 @@ func (a *App) appStoreConnectRefresh(w http.ResponseWriter, r *http.Request) {
 		"reconciled":     reconciliation.Reconciled,
 		"reconciliation": reconciliation,
 		"status":         a.appStoreConnectStatus(),
+	}
+	if reconcileErr != nil {
+		response["reconciliation_warning"] = reconcileErr.Error()
 	}
 	if refreshErr != nil {
 		response["warning"] = refreshErr.Error()
@@ -1177,9 +1176,36 @@ func (a *App) hasLegacyUploadSucceededEvent(jobID string) bool {
 	if !jobRE.MatchString(jobID) {
 		return false
 	}
-	raw, e := os.ReadFile(filepath.Join(a.data, "builds", jobID, "build.log"))
-	if e != nil || len(raw) == 0 || len(raw) > 2<<20 {
+	f, e := os.Open(filepath.Join(a.data, "builds", jobID, "build.log"))
+	if e != nil {
 		return false
+	}
+	defer f.Close()
+	info, e := f.Stat()
+	if e != nil || !info.Mode().IsRegular() || info.Size() <= 0 {
+		return false
+	}
+
+	// Upload is one of the final TestFlight stages, so inspect a bounded tail
+	// instead of rejecting normal multi-megabyte Xcode logs or loading them all.
+	const tailBytes int64 = 4 << 20
+	offset := int64(0)
+	if info.Size() > tailBytes {
+		offset = info.Size() - tailBytes
+	}
+	if _, e = f.Seek(offset, io.SeekStart); e != nil {
+		return false
+	}
+	raw, e := io.ReadAll(io.LimitReader(f, tailBytes+1))
+	if e != nil || len(raw) == 0 || int64(len(raw)) > tailBytes {
+		return false
+	}
+	if offset > 0 {
+		if newline := bytes.IndexByte(raw, '\n'); newline >= 0 {
+			raw = raw[newline+1:]
+		} else {
+			return false
+		}
 	}
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
@@ -1440,7 +1466,6 @@ func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, res
 			AutoSubmitBetaReview: profile.TestFlightSubmitBetaReview,
 		},
 	}
-	a.snapshotReleaseIcon(release, "")
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1482,6 +1507,7 @@ func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, res
 			return a.decorated(existing), nil
 		}
 	}
+	a.snapshotReleaseIcon(release, "")
 	next := state{Projects: a.state.Projects, Releases: append(append([]Release{}, a.state.Releases...), release)}
 	if e := a.save(next); e != nil {
 		_ = os.Remove(a.releaseIconPath(release.ID))
