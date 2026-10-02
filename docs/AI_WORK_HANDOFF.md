@@ -309,3 +309,27 @@ go build -o bin/localservice ./cmd/localservice
 - 不提交 `.localservice/`、admin token、`.p8`、证书、私钥、provisioning profile 或运行时产物。
 - 不把 Apple 私钥内容输出到聊天、日志或 Git。
 - 不把 TestFlight 上传成功解释为 TestFlight 已可安装。
+
+
+## 7. 暂停点与交接（2026-10-02）
+
+本轮 ILS 工作按用户要求在此暂停；当前 AI 回到 Sowhat 客户端开发，不再继续修改 ILS。
+
+当前代码实现点：
+
+- `6ab460af2ca2d015905bd98dbd3daf81434361f1` — TestFlight 历史 Release 回填诊断、旧 Job 结构化上传成功证据兼容、刷新后同步重载 Release/Build Job、固定顶部操作通知。
+- `943a302642696b2c40635708d3dba83dec4f455d` — 修复 macOS `/var -> /private/var` canonical path 导致的 App Icon/ASC 测试问题。
+- `0ffef75e96ea9868ace0d2413de3844b3d0b2882` — 初始 TestFlight Release reconciliation/backfill。
+
+当前尚未验证、接手者必须真实执行：
+
+1. `git pull --ff-only`
+2. `go test ./...`
+3. `go build -o bin/localservice ./cmd/localservice`
+4. 重启 ILS。
+5. 在 iOS 发布页点击“刷新发布状态”，确认顶部通知能给出 `scanned / eligible / reconciled / skipped` 结果。
+6. 确认历史 Sowhat TestFlight build `0.1.0 (224)`、`0.1.0 (228)` 是否自动出现在统一 iOS Release 列表并回写 Build Job `release_ids`。
+7. 如果仍未回填，以顶部通知的 skip reason 和对应 Build Job 的结构化 `ILS_EVENT` 日志为第一证据继续定位；不要根据自由文本或等待时间猜测上传成功。
+8. 继续确认 Apple Processing / TestFlight available 状态只由 App Store Connect API 真实证据推进。
+
+在上述本机测试、重启和真实 224/228 回填验证完成前，不得把本轮 ILS 修复记录为“已验证通过”。
