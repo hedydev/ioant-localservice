@@ -172,8 +172,14 @@ server {
     server_name ${DOMAIN};
 
     root ${REMOTE_ROOT};
+    index index.html;
     autoindex off;
     server_tokens off;
+
+    location = / {
+        limit_except GET HEAD { deny all; }
+        try_files /index.html =404;
+    }
 
     location = /_ils/health {
         default_type application/json;
@@ -259,6 +265,9 @@ NEXT
 fi
 
 curl --fail --silent --show-error --max-time 15 "https://${DOMAIN}/_ils/health" >/dev/null
-printf '\nHTTPS verification succeeded: https://%s/_ils/health\n' "$DOMAIN"
+curl --fail --silent --show-error --max-time 15 "https://${DOMAIN}/" >/dev/null
+printf '\nHTTPS verification succeeded:\n'
+printf '  https://%s/_ils/health\n' "$DOMAIN"
+printf '  https://%s/\n' "$DOMAIN"
 printf 'Static OTA root on EC2: %s\n' "$REMOTE_ROOT"
 printf 'This script provisions the gateway only; publishing IPA/manifest files is a separate ILS step.\n'

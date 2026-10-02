@@ -315,6 +315,26 @@ bash: line 7: $5: unbound variable
 
 该修复仍需用户重新运行真实 EC2 部署确认成功。
 
+### 1.17 OTA HTTPS 首页 404 修复（2026-10-02）
+
+用户完成 DNS + Certbot/Let's Encrypt 后，真实结果为：
+
+- `https://ota.ioant.com/_ils/health` 返回 `{"ok":true,"service":"ils-adhoc-ota"}`；
+- TLS/证书/Nginx vhost 已正常；
+- 但访问 `https://ota.ioant.com/` 返回 Nginx 404。
+
+根因是生成的 vhost 只使用 `try_files $uri =404`，未显式为根路径映射 `index.html`；部署脚本此前也只验证 health endpoint，因此没有捕获首页失败。
+
+修复为：
+
+- Nginx server 显式设置 `index index.html`；
+- 增加精确 `location = /`，用 `try_files /index.html =404` 稳定返回 OTA 首页；
+- TLS 部署完成后同时验证 `/_ils/health` 和 `/` 都必须返回 2xx；
+- 已存在的 Let's Encrypt 证书无需删除，重新运行正常部署命令即可复用/保持证书并刷新 vhost。
+
+该首页修复仍需用户重新运行真实 EC2 部署确认。
+
+
 
 
 
