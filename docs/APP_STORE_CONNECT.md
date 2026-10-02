@@ -69,7 +69,7 @@ The UI mirrors App Store Connect's TestFlight model as three separate status sur
 - **Internal Testing** — for example Ready for Testing / Testing;
 - **External Testing** — for example Ready to Submit / Waiting for Review / In Review / Ready for Testing / Testing.
 
-The primary Release/Build Job badge follows the most relevant Apple-facing build state. For example, when Internal Testing is ready but External Testing is still `READY_FOR_BETA_SUBMISSION`, the badge is **Ready to Submit**, matching App Store Connect, while the Internal Testing cell still shows **Ready for Testing**.
+The primary Release/Build Job badge follows the most relevant Apple-facing build state. For example, when Internal Testing is ready but External Testing is still `READY_FOR_BETA_SUBMISSION`, the badge is **Ready to Submit**, matching App Store Connect, while the Internal Testing cell still shows **Ready for Testing**. In this case the Release-level status remains `processing`, not `available`: internal readiness alone does not mean the externally distributable TestFlight release is testable or has an invitation/public link.
 
 ## TestFlight link
 

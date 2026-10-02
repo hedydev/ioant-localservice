@@ -268,7 +268,8 @@ func TestTestFlightState(t *testing.T) {
 		want       string
 	}{
 		{"processing", "PROCESSING", "", "", false, "processing"},
-		{"internal ready", "VALID", "READY_FOR_BETA_TESTING", "", false, "available"},
+		{"internal ready only", "VALID", "READY_FOR_BETA_TESTING", "", false, "processing"},
+		{"internal ready external not submitted", "VALID", "READY_FOR_BETA_TESTING", "READY_FOR_BETA_SUBMISSION", false, "processing"},
 		{"external testing", "VALID", "", "IN_BETA_TESTING", false, "available"},
 		{"failed", "FAILED", "", "", false, "unavailable"},
 		{"compliance", "VALID", "MISSING_EXPORT_COMPLIANCE", "", false, "processing"},

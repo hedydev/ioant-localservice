@@ -78,11 +78,9 @@ export function appIcon(src,{className='',title=''}={}){
 function appIdentityIcon(src,targets,{className='',title=''}={}){
  const values=uniqueTargets(targets);
  const fallback=platformIcons(values,{className:'app-icon-fallback-platforms'});
- const badge=platformIcons(values,{className:'compact app-icon-platform-icons'});
  return '<span class="app-icon-shell '+escapeAttribute(className)+'"'+(title?' title="'+escapeAttribute(title)+'"':'')+'>'+
   '<span class="app-icon-fallback" aria-hidden="true">'+fallback+'</span>'+
   (src?'<img data-app-icon class="app-icon" src="'+escapeAttribute(src)+'" alt="" loading="lazy">':'')+
-  (badge?'<span class="app-platform-badge">'+badge+'</span>':'')+
  '</span>';
 }
 

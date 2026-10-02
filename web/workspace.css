@@ -95,6 +95,17 @@
   color: var(--muted);
 }
 
+.overview-latest-grid {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 14px;
+}
+
+.overview-latest-grid .release-card {
+  min-width: 0;
+  height: 100%;
+}
+
 .toolbar {
   flex-wrap: wrap;
 }
@@ -802,31 +813,6 @@
   height: 42%;
 }
 
-.app-platform-badge {
-  position: absolute;
-  right: -5px;
-  bottom: -5px;
-  z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 18px;
-  padding: 2px 4px;
-  border: 2px solid #fff;
-  border-radius: 999px;
-  background: #fff;
-  color: #40566c;
-  box-shadow: 0 1px 4px #14253824;
-}
-
-.app-platform-badge .platform-icons {
-  margin: 0;
-}
-
-.release-card.featured .app-platform-badge {
-  border-color: #182736;
-}
-
 /* App Store Connect connection/sync summary. */
 .asc-status-card {
   margin-top: 16px;
@@ -899,6 +885,10 @@
 }
 
 @media (max-width: 720px) {
+  .overview-latest-grid {
+    grid-template-columns: minmax(0,1fr);
+  }
+
   .release-status {
     white-space: normal;
     text-align: center;

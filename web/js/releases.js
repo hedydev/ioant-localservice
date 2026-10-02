@@ -12,7 +12,6 @@ function filteredReleases(){
 }
 
 function renderOverview(){
- const latest=state.releases[0];
  const iosCount=state.releases.filter(item=>item.platform==='ios').length;
  const macCount=state.releases.filter(item=>item.platform==='macos').length;
  $('#overview-stats').innerHTML=[
@@ -21,11 +20,16 @@ function renderOverview(){
   ['macOS',macCount,['mac']]
  ].map(item=>'<div class="overview-stat"><strong>'+item[1]+'</strong><span>'+platformIcons(item[2])+item[0]+'</span></div>').join('');
 
- if(!latest){
-  $('#overview-latest').innerHTML='<div class="empty"><strong>暂无发布</strong>发布完成后，最新版本会显示在这里。</div>';
+ const latestByPlatform=['ios','macos']
+  .map(platform=>state.releases.find(release=>release.platform===platform))
+  .filter(Boolean);
+ if(!latestByPlatform.length){
+  $('#overview-latest').innerHTML='<div class="empty"><strong>暂无发布</strong>发布完成后，各平台最新 Release 会显示在这里。</div>';
   return;
  }
- $('#overview-latest').innerHTML=renderReleaseCard(latest,{featured:true});
+ $('#overview-latest').innerHTML='<div class="overview-latest-grid">'+
+  latestByPlatform.map(release=>renderReleaseCard(release,{featured:true})).join('')+
+ '</div>';
 }
 
 function renderReleaseHistory(){

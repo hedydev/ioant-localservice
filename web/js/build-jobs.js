@@ -13,7 +13,16 @@ function updateBuildLog(jobID,text){
  if(!element)return;
  const firstOpen=!buildState.logLoaded;
  const wasFollowing=firstOpen||buildState.followLog;
- element.textContent=text;
+ const previous=element.textContent||'';
+ if(previous===text){
+  buildState.logLoaded=true;
+  return;
+ }
+ if(previous&&text.startsWith(previous)){
+  element.append(document.createTextNode(text.slice(previous.length)));
+ }else{
+  element.textContent=text;
+ }
  buildState.logLoaded=true;
  if(wasFollowing){
   element.scrollTop=element.scrollHeight;
@@ -161,43 +170,78 @@ function pipelineView(job){
   return '<span class="pipeline-step '+stepState+'">'+escapeHTML(labels[stage]||stage)+'</span>';
  }).join('<span class="pipeline-arrow">→</span>')+'</div>';
 }
+function jobMainHTML(job){
+ const releases=job.release_ids||[];
+ return '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
+  '<div class="build-title-row">'+buildAppIcon(job,{className:'job-app-icon',title:job.title||'App Icon'})+'<strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
+  '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
+  pipelineView(job)+
+  (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+
+  progressView(job)+
+  (job.error?'<p>'+escapeHTML(job.error)+'</p>':'')+
+  resultView(job)+
+  (releases.length?'<div class="meta">关联发布：'+releases.length+' 个</div>':'')+
+  linkedReleaseActions(job);
+}
+
+function ensureLogPanel(article,job,expanded){
+ const existing=article.querySelector('.build-log-panel');
+ if(!expanded){
+  if(existing)existing.remove();
+  return;
+ }
+ if(existing)return;
+ const panel=document.createElement('div');
+ panel.className='build-log-panel';
+ panel.dataset.logFor=job.id;
+ panel.innerHTML='<div class="build-log-heading"><strong>'+(job.status==='running'?'实时日志':'任务日志')+'</strong><span class="meta">'+(job.status==='running'?'仅显示此构建任务的实时输出':'仅显示此构建任务已保存的输出')+'</span></div><pre class="build-log-output" id="build-log-'+escapeHTML(job.id)+'" data-build-log-output="'+escapeHTML(job.id)+'" aria-label="'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+' 构建日志"></pre>';
+ article.appendChild(panel);
+}
+
 function renderJobs(jobs){
  jobs=[...jobs].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+ const container=$('#build-jobs');
  if(!jobs.length){
   buildState.activeLog=null;
-  $('#build-jobs').innerHTML='<div class="empty"><strong>还没有构建任务</strong>运行 Release Profile 后，任务状态会显示在这里。</div>';
+  container.innerHTML='<div class="empty"><strong>还没有构建任务</strong>运行 Release Profile 后，任务状态会显示在这里。</div>';
   return;
  }
 
  chooseRunningLog(jobs);
 
- $('#build-jobs').innerHTML=jobs.map(job=>{
-  const releases=job.release_ids||[];
-  const expanded=buildState.activeLog===job.id;
-  const logID='build-log-'+job.id;
-  return '<article class="build-job'+(expanded?' log-expanded':'')+'">'+
-   '<div class="build-job-main">'+
-    '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
-    '<div class="build-title-row">'+buildAppIcon(job,{className:'job-app-icon',title:job.title||'App Icon'})+'<strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
-    '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
-    pipelineView(job)+
-    (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+
-    progressView(job)+
-    (job.error?'<p>'+escapeHTML(job.error)+'</p>':'')+
-    resultView(job)+
-    (releases.length?'<div class="meta">关联发布：'+releases.length+' 个</div>':'')+
-    linkedReleaseActions(job)+
-   '</div>'+
-   '<div class="build-job-actions">'+
-    '<button data-build-log="'+escapeHTML(job.id)+'" aria-expanded="'+(expanded?'true':'false')+'" aria-controls="'+escapeHTML(logID)+'">'+(expanded?'收起日志':'查看日志')+'</button>'+
-   '</div>'+
-   (expanded
-    ?'<div class="build-log-panel" data-log-for="'+escapeHTML(job.id)+'"><div class="build-log-heading"><strong>'+(job.status==='running'?'实时日志':'任务日志')+'</strong><span class="meta">'+(job.status==='running'?'仅显示此构建任务的实时输出':'仅显示此构建任务已保存的输出')+'</span></div><pre class="build-log-output" id="'+escapeHTML(logID)+'" data-build-log-output="'+escapeHTML(job.id)+'" aria-label="'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+' 构建日志"></pre></div>'
-    :'')+
-  '</article>';
- }).join('');
-}
+ const keep=new Set(jobs.map(job=>job.id));
+ container.querySelectorAll('[data-build-job-id]').forEach(article=>{
+  if(!keep.has(article.dataset.buildJobId))article.remove();
+ });
+ container.querySelector('.empty')?.remove();
 
+ jobs.forEach(job=>{
+  let article=container.querySelector('[data-build-job-id="'+CSS.escape(job.id)+'"]');
+  if(!article){
+   article=document.createElement('article');
+   article.dataset.buildJobId=job.id;
+   article.innerHTML='<div class="build-job-main"></div><div class="build-job-actions"><button type="button"></button></div>';
+  }
+
+  const expanded=buildState.activeLog===job.id;
+  article.className='build-job'+(expanded?' log-expanded':'');
+  const main=article.querySelector('.build-job-main');
+  const html=jobMainHTML(job);
+  if(main._ilsHTML!==html){
+   main.innerHTML=html;
+   main._ilsHTML=html;
+  }
+
+  const button=article.querySelector('.build-job-actions button');
+  button.dataset.buildLog=job.id;
+  button.setAttribute('aria-expanded',String(expanded));
+  button.setAttribute('aria-controls','build-log-'+job.id);
+  button.textContent=expanded?'收起日志':'查看日志';
+
+  ensureLogPanel(article,job,expanded);
+  container.appendChild(article);
+ });
+}
 export async function loadBuildJobs(){
  if(!state.project||!state.admin||buildState.jobsLoading)return;
  buildState.jobsLoading=true;

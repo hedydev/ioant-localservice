@@ -82,6 +82,7 @@ Shared action helpers may be imported when they represent a real reusable operat
 `build-jobs.js` owns the live build-log behavior:
 
 - every Build Job is an independent card; its **查看日志 / 收起日志** action is inside that same card, below the task summary, and the log panel renders immediately below that action inside the same card; there is no page-level or list-bottom log panel;
+- the 3-second Build Job refresh must reconcile cards by Job ID instead of replacing the whole list DOM. An expanded log panel stays mounted; unchanged log text is not rewritten, and appended output is added incrementally. This prevents visible flashing and preserves scroll/follow state.
 - a running task auto-expands its log unless the user explicitly collapsed that task;
 - only one task log is expanded at a time; historical tasks can be opened with **查看日志** and collapsed with **收起日志**;
 - first open scrolls to the newest output;
@@ -187,6 +188,8 @@ When App Store Connect API access is configured, ILS first matches the app's **B
 
 Overview, Release History and iOS Release all call the same `release-ui.js` card renderer. TestFlight cards do **not** collapse Apple state into a single linear `submitted → processing → available` display. They present **Build Upload**, **Internal Testing**, and **External Testing** independently, because Internal and External can legitimately be at different states at the same time. The primary badge follows the App Store Connect-facing build status (for example **Ready to Submit**) while the channel cells preserve their own states. TestFlight uses **在 TestFlight 中打开** instead of IPA install/download. An `ios-testflight` Release Profile may still store an optional `testflight_url` invitation as a fallback when Apple does not expose a public link through the configured account.
 
+Overview is platform-oriented rather than availability-filtered: it shows the latest iOS Release and the latest macOS Release independently. A TestFlight Release at **Ready to Submit** still appears in Overview; it is not hidden just because it lacks a TestFlight link.
+
 ## App Icon presentation
 
 App Icon artwork is separate from the Mac/iPhone/iPad platform-outline glyphs.
@@ -195,7 +198,7 @@ ILS keeps a platform-specific project icon cache. When a linked Git source is in
 
 For published iOS IPA files, ILS additionally extracts the largest usable compiled main-app App Icon PNG when available. Every new Release snapshots an icon into release-specific storage. TestFlight releases and macOS/fallback releases use the current platform-specific project cache when no artifact icon can be extracted. Existing releases are backfilled lazily from their retained artifact/cache when possible. Release History and the iOS release list use the release snapshot.
 
-The UI wraps artwork in a shared App Icon shell with a small platform badge. If the artwork endpoint is missing or fails to load, the failed `<img>` node is removed and the shell falls back to the Mac/iPhone/iPad glyphs instead of rendering a broken-image marker or leaving an empty identity slot.
+The UI wraps artwork in a shared App Icon shell. Platform glyphs are shown next to the app title, so a successfully loaded App Icon does not also carry a redundant overlaid platform badge. If the artwork endpoint is missing or fails to load, the failed `<img>` node is removed and the icon shell may fall back to the Mac/iPhone/iPad glyphs instead of rendering a broken-image marker or leaving an empty identity slot.
 
 ## App Store Connect module boundary
 

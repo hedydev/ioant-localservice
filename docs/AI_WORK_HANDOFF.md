@@ -258,6 +258,18 @@ platform
 
 仍需在用户 Mac 上执行 `go test ./...` / `go build` 并刷新真实 224/228 页面确认布局与状态一致。
 
+### 1.14 Build Job 稳定刷新、TestFlight availability 与 Overview 修正（2026-10-02）
+
+根据用户真实页面继续修正四点：
+
+- Build Job 3 秒轮询改为按 Job ID 增量更新，不再整块替换 `#build-jobs`；展开日志 DOM 保持挂载，日志无变化时不重写文本，有新增日志时追加 tail，避免每 3 秒闪烁并保持滚动位置。
+- Release-level `available` 不再由 Internal Testing 的 `READY_FOR_BETA_TESTING` 单独触发。External 仍 `READY_FOR_BETA_SUBMISSION / WAITING_FOR_BETA_REVIEW / IN_BETA_REVIEW / ...` 时整体仍为 `processing`；Internal 状态只作为独立子状态展示。只有 External Testing 进入可测试状态，整体才进入 `available`。
+- App Icon 上不再叠加重复的平台徽标；平台 icon 保留在标题旁。图标加载失败时仍可使用 icon shell 内的平台 fallback。
+- Overview 原来只显示 `state.releases[0]`，并不是“只显示 available”。现改为分别显示最新 iOS Release 与最新 macOS Release，不按 availability 过滤，因此 iOS `Ready to Submit` 也会出现在概览。
+
+仍需用户 Mac 执行 `go test ./...` / `go build` 并重启 ILS 后验证：日志不闪、224/228 不再被整体标为 available、App Icon 不再重复平台徽标、Overview 同时显示 iOS/macOS 最新 Release。
+
+
 
 
 ## 2. 当前产品语义必须保持

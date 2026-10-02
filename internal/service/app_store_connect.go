@@ -692,41 +692,55 @@ func testFlightState(processing, internal, external string, expired bool) (strin
 	case "PROCESSING", "":
 		return "processing", "Apple 正在 Processing"
 	}
-	if betaAvailable(internal) || betaAvailable(external) {
-		parts := []string{}
+
+	// The Release-level state follows the external TestFlight path because
+	// that is the state App Store Connect presents for the build and the path
+	// that can produce an invitation/public link. Internal readiness remains
+	// visible as a separate channel state but does not make the Release
+	// externally testable by itself.
+	switch external {
+	case "BETA_REJECTED":
+		return "unavailable", "External Testing: Rejected"
+	case "PROCESSING_EXCEPTION":
+		return "unavailable", "External Testing: Processing Exception"
+	case "EXPIRED":
+		return "unavailable", "External Testing: Expired"
+	case "MISSING_EXPORT_COMPLIANCE":
+		return "processing", "External Testing: Missing Export Compliance"
+	case "IN_EXPORT_COMPLIANCE_REVIEW":
+		return "processing", "External Testing: Export Compliance Review"
+	case "READY_FOR_BETA_SUBMISSION":
+		return "processing", "External Testing: Ready to Submit"
+	case "WAITING_FOR_BETA_REVIEW":
+		return "processing", "External Testing: Waiting for Review"
+	case "IN_BETA_REVIEW":
+		return "processing", "External Testing: In Review"
+	case "BETA_APPROVED":
+		return "processing", "External Testing: Approved"
+	}
+	if betaAvailable(external) {
+		parts := []string{"External Testing: " + betaStateLabel(external)}
 		if internal != "" {
 			parts = append(parts, "Internal Testing: "+betaStateLabel(internal))
 		}
-		if external != "" {
-			parts = append(parts, "External Testing: "+betaStateLabel(external))
-		}
-		if len(parts) == 0 {
-			parts = append(parts, "TestFlight Ready for Testing")
-		}
 		return "available", strings.Join(parts, " · ")
 	}
-	switch {
-	case internal == "MISSING_EXPORT_COMPLIANCE" || external == "MISSING_EXPORT_COMPLIANCE":
-		return "processing", "Missing Export Compliance"
-	case internal == "IN_EXPORT_COMPLIANCE_REVIEW" || external == "IN_EXPORT_COMPLIANCE_REVIEW":
-		return "processing", "Export Compliance Review"
-	case internal == "PROCESSING_EXCEPTION" || external == "PROCESSING_EXCEPTION":
-		return "unavailable", "Processing Exception"
-	case external == "BETA_REJECTED":
-		return "unavailable", "External Testing: Rejected"
-	case external == "WAITING_FOR_BETA_REVIEW":
-		return "processing", "External Testing: Waiting for Review"
-	case external == "IN_BETA_REVIEW":
-		return "processing", "External Testing: In Review"
-	case external == "READY_FOR_BETA_SUBMISSION":
-		return "processing", "External Testing: Ready to Submit"
-	case external == "BETA_APPROVED":
-		return "processing", "External Testing: Approved"
-	case internal != "":
-		return "processing", "Internal Testing: " + betaStateLabel(internal)
-	default:
-		return "processing", "Apple 已完成二进制处理；等待 TestFlight 状态"
+
+	switch internal {
+	case "PROCESSING_EXCEPTION":
+		return "unavailable", "Internal Testing: Processing Exception"
+	case "MISSING_EXPORT_COMPLIANCE":
+		return "processing", "Internal Testing: Missing Export Compliance"
+	case "IN_EXPORT_COMPLIANCE_REVIEW":
+		return "processing", "Internal Testing: Export Compliance Review"
 	}
+	if betaAvailable(internal) {
+		return "processing", "Internal Testing: " + betaStateLabel(internal) + " · External Testing: Not Submitted"
+	}
+	if internal != "" {
+		return "processing", "Internal Testing: " + betaStateLabel(internal)
+	}
+	return "processing", "Apple 已完成二进制处理；等待 TestFlight 状态"
 }
 
 func testFlightReleaseNeedsFrequentRefresh(release Release) bool {
