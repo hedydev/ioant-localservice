@@ -50,7 +50,7 @@ Bundle ID
 -> optional Group assignment / Beta App Review automation
 ```
 
-The Build Upload layer is authoritative during Apple's early import phase. Apple exposes `AWAITING_UPLOAD`, `PROCESSING`, `FAILED`, and `COMPLETE`; a normal Build resource may not exist yet while Build Upload is still Processing. ILS therefore mirrors Build Upload first instead of leaving a real Apple Processing upload at `submitted`.
+The Build Upload layer is authoritative during Apple's early import phase. Apple exposes `AWAITING_UPLOAD`, `PROCESSING`, `FAILED`, and `COMPLETE`; a normal Build resource may not exist yet while Build Upload is still Processing. In the current API schema, `BuildUpload.attributes.state` is an object whose nested `state` property contains that enum and whose `errors`, `warnings`, and `infos` arrays carry upload diagnostics. ILS accepts this object form and also tolerates the older plain-string state form. It mirrors the nested Build Upload state first instead of leaving a real Apple Processing upload at `submitted`.
 
 ILS maps the evidence into the common Release status:
 
@@ -61,7 +61,7 @@ ILS maps the evidence into the common Release status:
 | `available` | Internal or external Build Beta Detail reports a beta-testing-ready/testing state |
 | `unavailable` | Apple reports invalid/failed processing, expiration, processing exception, or beta rejection |
 
-The raw Apple fields are also retained under the Release's `testflight` metadata for diagnosis, including `build_upload_state`, Build `processing_state`, internal/external beta states, resolved Group information, and Beta Review state. The Release/Build Job badge surfaces Build Upload `PROCESSING / COMPLETE / FAILED` directly so it can be compared with App Store Connect's **Build Uploads** table.
+The raw Apple fields are also retained under the Release's `testflight` metadata for diagnosis, including `build_upload_state`, Build Upload error/warning/info counts, Build `processing_state`, internal/external beta states, resolved Group information, and Beta Review state. The Release/Build Job badge surfaces Build Upload `PROCESSING / COMPLETE / FAILED` directly so it can be compared with App Store Connect's **Build Uploads** table.
 
 ## TestFlight link
 

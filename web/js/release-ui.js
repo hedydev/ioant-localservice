@@ -107,7 +107,13 @@ function releaseDetailsView(release){
  let details='<details><summary>发布信息</summary><p>'+escapeHTML(releaseInstallNote(release))+'</p>';
  if(release.delivery==='testflight'){
   details+='<p>'+escapeHTML(release.bundle_id||'')+' · TestFlight</p>';
-  if(release.testflight?.build_upload_state)details+='<p>Build Upload: '+escapeHTML(release.testflight.build_upload_state)+'</p>';
+  if(release.testflight?.build_upload_state){
+   const counts=[];
+   if(release.testflight.build_upload_error_count)counts.push(release.testflight.build_upload_error_count+' errors');
+   if(release.testflight.build_upload_warning_count)counts.push(release.testflight.build_upload_warning_count+' warnings');
+   if(release.testflight.build_upload_info_count)counts.push(release.testflight.build_upload_info_count+' infos');
+   details+='<p>Build Upload: '+escapeHTML(release.testflight.build_upload_state)+(counts.length?' · '+escapeHTML(counts.join(' · ')):'')+'</p>';
+  }
   if(release.testflight?.processing_state)details+='<p>Build Processing: '+escapeHTML(release.testflight.processing_state)+'</p>';
   if(release.testflight?.internal_build_state)details+='<p>Internal Beta: '+escapeHTML(release.testflight.internal_build_state)+'</p>';
   if(release.testflight?.external_build_state)details+='<p>External Beta: '+escapeHTML(release.testflight.external_build_state)+'</p>';

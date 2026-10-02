@@ -227,6 +227,22 @@ platform
 
 这些新增测试仍需在用户 Mac 上真实执行 `go test ./...` 和 `go build` 后才能记录为通过。
 
+### 1.12 Build Upload state 对象解析修复（2026-10-02）
+
+用户真实刷新 App Store Connect 后确认历史 Release reconciliation 已成功（2 个任务均可恢复/已关联），但 Apple 状态同步报 `App Store Connect build upload attributes 无效`。根因是 ILS 把当前 App Store Connect API 的 `BuildUpload.attributes.state` 错误定义成字符串；Apple 当前返回的是包含嵌套 `state` 以及 `errors / warnings / infos` 的对象。
+
+修复内容：
+
+- 新增兼容 Build Upload state 类型，正确解析当前对象格式；
+- 同时兼容旧的纯字符串 state，避免历史/API 兼容回退；
+- Release metadata 保存 Build Upload state 以及 error/warning/info 数量；
+- Build Upload 状态消息会附带诊断数量；
+- Release 详情显示这些计数；
+- 新增 nested PROCESSING / FAILED、legacy string COMPLETE、缺少 nested state 的非法响应，以及诊断数量格式测试。
+
+当前仍需用户 Mac 真实执行 `go test ./...` / `go build`，然后点击“刷新发布状态”确认 Sowhat 228 显示 `Build Upload Processing`，224 不再出现 attributes 解析错误并继续进入 Build/Beta Detail 状态链。
+
+
 ## 2. 当前产品语义必须保持
 
 最重要的一条：

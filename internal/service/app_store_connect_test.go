@@ -120,6 +120,67 @@ func TestNormalizeAppStoreConnectConfig(t *testing.T) {
 	}
 }
 
+func TestBuildUploadAttributesAcceptsNestedAndLegacyState(t *testing.T) {
+	tests := []struct {
+		name         string
+		raw          string
+		wantState    string
+		wantErrors   int
+		wantWarnings int
+		wantInfos    int
+	}{
+		{
+			name: "current nested state",
+			raw: `{"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"228","platform":"IOS","state":{"state":"PROCESSING","errors":[],"warnings":[{"code":"WARN"}],"infos":[{"message":"Processing"}]}}`,
+			wantState: "PROCESSING",
+			wantWarnings: 1,
+			wantInfos: 1,
+		},
+		{
+			name: "failed nested state",
+			raw: `{"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"229","platform":"IOS","state":{"state":"FAILED","errors":[{"code":"ERR1"},{"code":"ERR2"}],"warnings":[],"infos":[]}}`,
+			wantState: "FAILED",
+			wantErrors: 2,
+		},
+		{
+			name: "legacy string state",
+			raw: `{"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"224","platform":"IOS","state":"COMPLETE"}`,
+			wantState: "COMPLETE",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var attrs ascBuildUploadAttributes
+			if err := json.Unmarshal([]byte(tc.raw), &attrs); err != nil {
+				t.Fatal(err)
+			}
+			if attrs.State.State != tc.wantState ||
+				len(attrs.State.Errors) != tc.wantErrors ||
+				len(attrs.State.Warnings) != tc.wantWarnings ||
+				len(attrs.State.Infos) != tc.wantInfos {
+				t.Fatalf("parsed state = %#v", attrs.State)
+			}
+		})
+	}
+
+	var invalid ascBuildUploadAttributes
+	if err := json.Unmarshal([]byte(`{"state":{"warnings":[]}}`), &invalid); err == nil {
+		t.Fatal("expected nested state without state value to fail")
+	}
+}
+
+func TestBuildUploadDiagnosticSuffix(t *testing.T) {
+	state := ascBuildUploadState{
+		State: "FAILED",
+		Errors: []json.RawMessage{json.RawMessage(`{"code":"A"}`), json.RawMessage(`{"code":"B"}`)},
+		Warnings: []json.RawMessage{json.RawMessage(`{"code":"W"}`)},
+		Infos: []json.RawMessage{json.RawMessage(`{"message":"I"}`)},
+	}
+	if got, want := buildUploadDiagnosticSuffix(state), "（2 个错误，1 个警告，1 条信息）"; got != want {
+		t.Fatalf("suffix = %q, want %q", got, want)
+	}
+}
+
 func TestBuildUploadState(t *testing.T) {
 	tests := []struct {
 		name       string

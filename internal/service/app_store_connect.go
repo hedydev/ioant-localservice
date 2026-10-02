@@ -48,9 +48,12 @@ type AppStoreConnectConfigStatus struct {
 }
 
 type TestFlightReleaseInfo struct {
-	BuildUploadID        string     `json:"build_upload_id,omitempty"`
-	BuildUploadState     string     `json:"build_upload_state,omitempty"`
-	AppleBuildID         string     `json:"apple_build_id,omitempty"`
+	BuildUploadID           string     `json:"build_upload_id,omitempty"`
+	BuildUploadState        string     `json:"build_upload_state,omitempty"`
+	BuildUploadErrorCount   int        `json:"build_upload_error_count,omitempty"`
+	BuildUploadWarningCount int        `json:"build_upload_warning_count,omitempty"`
+	BuildUploadInfoCount    int        `json:"build_upload_info_count,omitempty"`
+	AppleBuildID            string     `json:"apple_build_id,omitempty"`
 	ProcessingState      string     `json:"processing_state,omitempty"`
 	InternalBuildState   string     `json:"internal_build_state,omitempty"`
 	ExternalBuildState   string     `json:"external_build_state,omitempty"`
@@ -99,13 +102,41 @@ type ascBuildAttributes struct {
 	Expired         bool   `json:"expired"`
 }
 
+type ascBuildUploadState struct {
+	State    string            `json:"state"`
+	Errors   []json.RawMessage `json:"errors,omitempty"`
+	Warnings []json.RawMessage `json:"warnings,omitempty"`
+	Infos    []json.RawMessage `json:"infos,omitempty"`
+}
+
+func (s *ascBuildUploadState) UnmarshalJSON(raw []byte) error {
+	var legacy string
+	if json.Unmarshal(raw, &legacy) == nil {
+		s.State = legacy
+		s.Errors = nil
+		s.Warnings = nil
+		s.Infos = nil
+		return nil
+	}
+	type stateAlias ascBuildUploadState
+	var nested stateAlias
+	if e := json.Unmarshal(raw, &nested); e != nil {
+		return e
+	}
+	if strings.TrimSpace(nested.State) == "" {
+		return fmt.Errorf("Build Upload state 缺少 state 字段")
+	}
+	*s = ascBuildUploadState(nested)
+	return nil
+}
+
 type ascBuildUploadAttributes struct {
-	CFBundleShortVersionString string `json:"cfBundleShortVersionString"`
-	CFBundleVersion            string `json:"cfBundleVersion"`
-	State                      string `json:"state"`
-	Platform                   string `json:"platform"`
-	CreatedDate                string `json:"createdDate"`
-	UploadedDate               string `json:"uploadedDate"`
+	CFBundleShortVersionString string              `json:"cfBundleShortVersionString"`
+	CFBundleVersion            string              `json:"cfBundleVersion"`
+	State                      ascBuildUploadState `json:"state"`
+	Platform                   string              `json:"platform"`
+	CreatedDate                string              `json:"createdDate"`
+	UploadedDate               string              `json:"uploadedDate"`
 }
 
 type ascBetaDetailAttributes struct {
@@ -561,6 +592,23 @@ func (r *ascResolver) preReleaseVersionID(ctx context.Context, appID, version st
 	return response.Data[0].ID, nil
 }
 
+func buildUploadDiagnosticSuffix(state ascBuildUploadState) string {
+	parts := []string{}
+	if len(state.Errors) > 0 {
+		parts = append(parts, fmt.Sprintf("%d 个错误", len(state.Errors)))
+	}
+	if len(state.Warnings) > 0 {
+		parts = append(parts, fmt.Sprintf("%d 个警告", len(state.Warnings)))
+	}
+	if len(state.Infos) > 0 {
+		parts = append(parts, fmt.Sprintf("%d 条信息", len(state.Infos)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "（" + strings.Join(parts, "，") + "）"
+}
+
 func buildUploadState(state string) (string, string, bool) {
 	switch state {
 	case "AWAITING_UPLOAD":
@@ -821,10 +869,13 @@ func (r *ascResolver) testFlight(ctx context.Context, release Release) (testFlig
 	}
 	if uploadFound {
 		info.BuildUploadID = upload.ID
-		info.BuildUploadState = uploadAttributes.State
-		status, message, continueToBuild := buildUploadState(uploadAttributes.State)
+		info.BuildUploadState = uploadAttributes.State.State
+		info.BuildUploadErrorCount = len(uploadAttributes.State.Errors)
+		info.BuildUploadWarningCount = len(uploadAttributes.State.Warnings)
+		info.BuildUploadInfoCount = len(uploadAttributes.State.Infos)
+		status, message, continueToBuild := buildUploadState(uploadAttributes.State.State)
 		result.Status = status
-		result.StatusMessage = message
+		result.StatusMessage = message + buildUploadDiagnosticSuffix(uploadAttributes.State)
 		result.Info = info
 		if !continueToBuild {
 			return result, nil
@@ -1021,6 +1072,9 @@ func (a *App) refreshTestFlightReleases(ctx context.Context, cfg AppStoreConnect
 			if release.TestFlight != nil {
 				lookup.Info.BuildUploadID = release.TestFlight.BuildUploadID
 				lookup.Info.BuildUploadState = release.TestFlight.BuildUploadState
+				lookup.Info.BuildUploadErrorCount = release.TestFlight.BuildUploadErrorCount
+				lookup.Info.BuildUploadWarningCount = release.TestFlight.BuildUploadWarningCount
+				lookup.Info.BuildUploadInfoCount = release.TestFlight.BuildUploadInfoCount
 				lookup.Info.TargetGroupName = release.TestFlight.TargetGroupName
 				lookup.Info.TargetGroupType = release.TestFlight.TargetGroupType
 				lookup.Info.AutoCreateGroup = release.TestFlight.AutoCreateGroup
