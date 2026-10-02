@@ -2,7 +2,7 @@
 
 > Last updated: 2026-10-02  
 > AI-Agent: ChatGPT  
-> AI-Session: `ils-release-ui-convergence-2026-10-02`
+> AI-Session: `n6q4m8zt`
 
 本文记录当前这轮 ILS UI / Apple Release 工作的关键实现、产品语义和下一步验证点，供下一位 AI 或开发者直接接手。可复用的架构规则仍以 `docs/WEB_UI_ARCHITECTURE.md`、`docs/RELEASE_PROFILES.md`、`docs/APP_STORE_CONNECT.md` 为准。
 
@@ -245,22 +245,21 @@ App Store Connect UI 已从 iOS 主模块中拆出，避免后续 Apple API / Te
 最近一次主分支实现提交：
 
 ```text
-44ec6e348d9734d8eafaff1abffa40e62ee87980
-Unify TestFlight releases and sync App Store Connect state
+0ffef75e96ea9868ace0d2413de3844b3d0b2882
+Reconcile missing TestFlight releases
 ```
 
-提交已包含：
+提交在既有 TestFlight / App Store Connect 集成上新增：
 
-- TestFlight → normal Release metadata
-- App Store Connect JWT / API 状态查询
-- processing / beta 状态映射
-- Beta Group public link
-- App Store Connect 配置 UI
-- TestFlight Release / Build Job 状态同步
-- 相关测试
-- docs 更新
+- 从持久化 `upload-succeeded` Build Job 自动回填缺失的 TestFlight Release；
+- 重建并持久化 Job `release_ids` 关联；
+- 服务启动和手动 App Store Connect 刷新都执行 reconciliation；
+- 新 Build Job 保存恢复所需的 Release Profile 元数据快照；
+- TestFlight 去重按 Bundle ID + version + build 的 Apple build 身份收敛；
+- Build Job 在缺失 Release 时明确显示“ILS Release 待同步”，不再用 fallback card 掩盖数据缺口；
+- 新增历史任务回填、Profile snapshot fallback、拒绝不可信上传结果和 Apple build 去重测试。
 
-**当前对话已对新增/重写的前端 ES modules 执行 JavaScript 语法检查；仍未在用户 Mac 上执行本次提交后的 `go test ./...` / 完整 ILS runtime 验证。**
+**本次改动已做 GitHub 侧静态结构检查，但没有在用户 Mac 上实际执行 `go test ./...`、`go build` 或重启后的真实 state.json / Build Job 回填验证；这些不能记录为通过。**
 
 因此下一位接手者首先应该在本机从当前 `main` 开始：
 
