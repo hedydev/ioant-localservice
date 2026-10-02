@@ -289,6 +289,33 @@ platform
 
 脚本不会修改现有 `ioant.com` / V2Ray 站点逻辑；会在覆盖自己的 OTA site config 前备份，并在 reload 前执行 `nginx -t`。本轮只完成 gateway provisioning，尚未把 ILS Ad Hoc Release 的 IPA/manifest 自动同步到 EC2，也不会改写本地 ILS `-public-url`。下一步应在域名确定并真实部署验证后，再设计独立的 artifact publish/sync 步骤。
 
+### 1.16 Ad Hoc OTA prepare-only 实机参数修复（2026-10-02）
+
+用户首次真实执行：
+
+```sh
+./scripts/deploy-adhoc-ota-gateway.sh --domain ota.ioant.com --prepare-only
+```
+
+SSH 已成功连接 EC2，但远端脚本因 `set -u` 直接读取缺失的尾部空参数 `$5` 而失败：
+
+```text
+bash: line 7: $5: unbound variable
+```
+
+根因是 prepare-only 模式下 email 为空，SSH 远端命令重组不能依赖“尾部空字符串参数”被保留。
+
+修复为：
+
+- 远端只要求前 4 个参数；
+- email 使用 `${5:-}` 安全缺省；
+- 远端显式校验 `PREPARE_ONLY=0|1`；
+- 只有非 prepare-only 模式才要求 email；
+- 不需要清理 EC2，可直接拉取修复后重新执行原 prepare-only 命令。
+
+该修复仍需用户重新运行真实 EC2 部署确认成功。
+
+
 
 
 

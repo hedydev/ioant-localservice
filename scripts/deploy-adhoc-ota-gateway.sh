@@ -122,11 +122,26 @@ ssh "${SSH_OPTS[@]}" "$SSH_USER@$HOST" bash -s -- \
   "$DOMAIN" "$REMOTE_ROOT" "$SSH_USER" "$PREPARE_ONLY" "$EMAIL" <<'REMOTE'
 set -euo pipefail
 
+[[ $# -ge 4 ]] || {
+  echo "ERROR: remote deploy requires DOMAIN REMOTE_ROOT OWNER PREPARE_ONLY [EMAIL]" >&2
+  exit 2
+}
+
 DOMAIN="$1"
 REMOTE_ROOT="$2"
 OWNER="$3"
 PREPARE_ONLY="$4"
-EMAIL="$5"
+EMAIL="${5:-}"
+
+[[ "$PREPARE_ONLY" == "0" || "$PREPARE_ONLY" == "1" ]] || {
+  echo "ERROR: invalid PREPARE_ONLY value: $PREPARE_ONLY" >&2
+  exit 2
+}
+if [[ "$PREPARE_ONLY" != "1" && -z "$EMAIL" ]]; then
+  echo "ERROR: email is required for Let's Encrypt TLS provisioning" >&2
+  exit 2
+fi
+
 SITE_NAME="ils-adhoc-ota-${DOMAIN//./-}"
 SITE_AVAILABLE="/etc/nginx/sites-available/${SITE_NAME}.conf"
 SITE_ENABLED="/etc/nginx/sites-enabled/${SITE_NAME}.conf"
