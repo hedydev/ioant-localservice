@@ -192,10 +192,14 @@ func TestAppStoreConnectBuildEnvOnlyInjectsTeamKeys(t *testing.T) {
 	if len(env) != 3 {
 		t.Fatalf("team key env length = %d, want 3: %#v", len(env), env)
 	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	joined := strings.Join(env, "\n")
 	for _, want := range []string{
 		"ILS_ASC_KEY_ID=ABCDEF1234",
-		"ILS_ASC_KEY_PATH=" + path,
+		"ILS_ASC_KEY_PATH=" + realPath,
 		"ILS_ASC_ISSUER_ID=" + team.IssuerID,
 	} {
 		if !strings.Contains(joined, want) {

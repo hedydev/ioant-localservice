@@ -145,15 +145,27 @@ func canonicalRepo(path string) (string, error) {
 	return filepath.EvalSymlinks(top)
 }
 func safeTracked(root, path string, max int64) ([]byte, error) {
-	full := filepath.Join(root, filepath.FromSlash(path))
+	rootReal, e := filepath.EvalSymlinks(root)
+	if e != nil {
+		return nil, fmt.Errorf("项目目录不存在")
+	}
+	relative := filepath.Clean(filepath.FromSlash(path))
+	if filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("文件路径无效")
+	}
+	full := filepath.Join(rootReal, relative)
 	real, e := filepath.EvalSymlinks(full)
 	if e != nil || real != full {
 		return nil, fmt.Errorf("文件不存在或使用符号链接")
 	}
-	if _, e = gitRead(root, "ls-files", "--error-unmatch", "--", path); e != nil {
+	inside, e := filepath.Rel(rootReal, real)
+	if e != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("文件逃离项目目录")
+	}
+	if _, e = gitRead(rootReal, "ls-files", "--error-unmatch", "--", filepath.ToSlash(relative)); e != nil {
 		return nil, fmt.Errorf("文件尚未纳入 Git")
 	}
-	f, e := os.Open(full)
+	f, e := os.Open(real)
 	if e != nil {
 		return nil, e
 	}

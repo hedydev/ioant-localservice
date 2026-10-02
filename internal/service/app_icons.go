@@ -73,16 +73,28 @@ func readCatalogPNG(root, setDir, filename string) ([]byte, error) {
 	if name == "" || filepath.IsAbs(name) || filepath.Base(name) != name || strings.ToLower(filepath.Ext(name)) != ".png" {
 		return nil, os.ErrInvalid
 	}
-	full := filepath.Join(root, filepath.FromSlash(setDir), name)
+	rootReal, e := filepath.EvalSymlinks(root)
+	if e != nil {
+		return nil, os.ErrInvalid
+	}
+	relativeDir := filepath.Clean(filepath.FromSlash(setDir))
+	if filepath.IsAbs(relativeDir) || relativeDir == ".." || strings.HasPrefix(relativeDir, ".."+string(filepath.Separator)) {
+		return nil, os.ErrInvalid
+	}
+	full := filepath.Join(rootReal, relativeDir, name)
 	real, e := filepath.EvalSymlinks(full)
 	if e != nil || real != full {
 		return nil, os.ErrInvalid
 	}
-	info, e := os.Stat(full)
+	inside, e := filepath.Rel(rootReal, real)
+	if e != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return nil, os.ErrInvalid
+	}
+	info, e := os.Stat(real)
 	if e != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxAppIconBytes {
 		return nil, os.ErrInvalid
 	}
-	raw, e := os.ReadFile(full)
+	raw, e := os.ReadFile(real)
 	if e != nil || int64(len(raw)) > maxAppIconBytes || !pngBytes(raw) {
 		return nil, os.ErrInvalid
 	}
