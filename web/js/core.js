@@ -20,9 +20,34 @@ export async function api(path,options={}){
  return data;
 }
 
-export function notice(message){
- $('#notice').textContent=message||'';
- $('#notice').hidden=!message;
+let noticeTimer=null;
+
+export function notice(message,kind='info',timeout=4500){
+ const element=$('#notice');
+ if(noticeTimer){
+  clearTimeout(noticeTimer);
+  noticeTimer=null;
+ }
+ if(!message){
+  element.textContent='';
+  element.hidden=true;
+  element.dataset.kind='';
+  return;
+ }
+ element.textContent=message;
+ element.dataset.kind=kind;
+ element.hidden=false;
+ element.setAttribute('role',kind==='error'?'alert':'status');
+ if(timeout>0){
+  noticeTimer=setTimeout(()=>{
+   if(element.textContent===message){
+    element.hidden=true;
+    element.textContent='';
+    element.dataset.kind='';
+   }
+   noticeTimer=null;
+  },timeout);
+ }
 }
 
 export function needAdmin(){

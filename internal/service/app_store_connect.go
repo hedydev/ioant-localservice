@@ -1109,7 +1109,7 @@ func (a *App) appStoreConnectRefresh(w http.ResponseWriter, r *http.Request) {
 	if !a.authorized(w, r) {
 		return
 	}
-	reconciled, reconcileErr := a.reconcileTestFlightBuildJobs()
+	reconciliation, reconcileErr := a.reconcileTestFlightBuildJobs()
 	if reconcileErr != nil {
 		fail(w, 500, "修复 TestFlight Release 关联失败："+reconcileErr.Error())
 		return
@@ -1133,7 +1133,12 @@ func (a *App) appStoreConnectRefresh(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	count, refreshErr := a.refreshTestFlightReleases(ctx, cfg)
 	a.recordASCRefresh(refreshErr)
-	response := map[string]any{"updated": count, "reconciled": reconciled, "status": a.appStoreConnectStatus()}
+	response := map[string]any{
+		"updated":        count,
+		"reconciled":     reconciliation.Reconciled,
+		"reconciliation": reconciliation,
+		"status":         a.appStoreConnectStatus(),
+	}
 	if refreshErr != nil {
 		response["warning"] = refreshErr.Error()
 	}
@@ -1155,20 +1160,85 @@ func (a *App) appStoreConnectBuildEnv() []string {
 	}
 }
 
-func isRecoverableTestFlightJob(job BuildJob) bool {
-	if job.ID == "" || job.ProjectID == "" || job.Result == nil || job.Lane != "ios-testflight" {
+type TestFlightReconcileReport struct {
+	Scanned       int            `json:"scanned"`
+	Eligible      int            `json:"eligible"`
+	Reconciled    int            `json:"reconciled"`
+	AlreadyLinked int            `json:"already_linked"`
+	Active        int            `json:"active"`
+	Skipped       map[string]int `json:"skipped,omitempty"`
+}
+
+func isPotentialTestFlightJob(job BuildJob) bool {
+	return job.Lane == "ios-testflight" || (job.Result != nil && job.Result.Lane == "ios-testflight")
+}
+
+func (a *App) hasLegacyUploadSucceededEvent(jobID string) bool {
+	if !jobRE.MatchString(jobID) {
 		return false
+	}
+	raw, e := os.ReadFile(filepath.Join(a.data, "builds", jobID, "build.log"))
+	if e != nil || len(raw) == 0 || len(raw) > 2<<20 {
+		return false
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "ILS_EVENT ") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "ILS_EVENT "))
+		if payload == "" || len(payload) > 16<<10 {
+			continue
+		}
+		var event BuildEvent
+		dec := json.NewDecoder(strings.NewReader(payload))
+		dec.DisallowUnknownFields()
+		if dec.Decode(&event) == nil && event.Stage == "upload" && event.State == "succeeded" {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) testFlightRecoverySkipReason(job BuildJob) string {
+	if job.ID == "" || job.ProjectID == "" {
+		return "invalid_job_identity"
+	}
+	if job.Result == nil {
+		return "missing_result"
+	}
+	if job.Lane != "" && job.Lane != "ios-testflight" {
+		return "different_job_lane"
 	}
 	result := job.Result
-	if result.SchemaVersion != 1 || result.Lane != "ios-testflight" || result.Status != "submitted" || result.Platform != "ios" ||
-		result.Distribution != "app-store-connect" || result.SubmissionResult != "upload-succeeded" ||
-		strings.TrimSpace(result.BundleID) == "" || !validVersion(result.Version) {
-		return false
+	if result.SchemaVersion != 0 && result.SchemaVersion != 1 {
+		return "unsupported_result_schema"
+	}
+	if result.Lane != "ios-testflight" {
+		return "different_result_lane"
+	}
+	if result.Status != "submitted" || result.Platform != "ios" || result.Distribution != "app-store-connect" {
+		return "not_submitted_to_app_store_connect"
+	}
+	if result.SubmissionResult != "upload-succeeded" {
+		if result.SubmissionResult != "" || !a.hasLegacyUploadSucceededEvent(job.ID) {
+			return "missing_upload_succeeded_evidence"
+		}
+	}
+	if strings.TrimSpace(result.BundleID) == "" || !validVersion(result.Version) {
+		return "invalid_app_identity"
 	}
 	if _, e := parseBuild(result.Build); e != nil {
-		return false
+		return "invalid_build_number"
 	}
-	return result.Architecture == "arm64" && result.Artifact == ""
+	if result.Architecture != "arm64" || result.Artifact != "" {
+		return "unexpected_testflight_result"
+	}
+	return ""
+}
+
+func (a *App) isRecoverableTestFlightJob(job BuildJob) bool {
+	return a.testFlightRecoverySkipReason(job) == ""
 }
 
 func (a *App) recoveryProfileForTestFlightJob(job BuildJob) ReleaseProfile {
@@ -1245,7 +1315,7 @@ func (a *App) linkStoredBuildRelease(jobID, projectID, releaseID string) error {
 	if !containsReleaseID(job.ReleaseIDs, releaseID) {
 		job.ReleaseIDs = append(job.ReleaseIDs, releaseID)
 	}
-	if job.Status == "running" && a.activeBuild != job.ID && isRecoverableTestFlightJob(job) {
+	if job.Status == "running" && a.activeBuild != job.ID && a.isRecoverableTestFlightJob(job) {
 		now := time.Now().UTC()
 		job.Status = "succeeded"
 		job.Stage = "submitted"
@@ -1258,26 +1328,38 @@ func (a *App) linkStoredBuildRelease(jobID, projectID, releaseID string) error {
 	return atomicJSON(a.buildJobPath(job.ID), job)
 }
 
-func (a *App) reconcileTestFlightBuildJobs() (int, error) {
+func (a *App) reconcileTestFlightBuildJobs() (TestFlightReconcileReport, error) {
+	report := TestFlightReconcileReport{Skipped: map[string]int{}}
 	paths, e := filepath.Glob(filepath.Join(a.data, "builds", "*", "job.json"))
 	if e != nil {
-		return 0, e
+		return report, e
 	}
-	repaired := 0
 	var firstErr error
 	jobs := make([]BuildJob, 0, len(paths))
 	for _, path := range paths {
 		raw, readErr := os.ReadFile(path)
 		if readErr != nil {
+			report.Skipped["read_failed"]++
 			if firstErr == nil {
 				firstErr = readErr
 			}
 			continue
 		}
 		var job BuildJob
-		if json.Unmarshal(raw, &job) == nil && isRecoverableTestFlightJob(job) {
-			jobs = append(jobs, job)
+		if json.Unmarshal(raw, &job) != nil {
+			report.Skipped["invalid_job_json"]++
+			continue
 		}
+		if !isPotentialTestFlightJob(job) {
+			continue
+		}
+		report.Scanned++
+		if reason := a.testFlightRecoverySkipReason(job); reason != "" {
+			report.Skipped[reason]++
+			continue
+		}
+		report.Eligible++
+		jobs = append(jobs, job)
 	}
 	// Process oldest to newest so an idempotent retry of the same Apple build
 	// becomes the Release's current BuildJobID deterministically.
@@ -1289,12 +1371,14 @@ func (a *App) reconcileTestFlightBuildJobs() (int, error) {
 		active := a.activeBuild == job.ID
 		a.buildMu.Unlock()
 		if active {
+			report.Active++
 			continue
 		}
 
 		profile := a.recoveryProfileForTestFlightJob(job)
 		release, publishErr := a.publishTestFlightRelease(job, profile, *job.Result)
 		if publishErr != nil {
+			report.Skipped["publish_failed"]++
 			if firstErr == nil {
 				firstErr = publishErr
 			}
@@ -1302,16 +1386,22 @@ func (a *App) reconcileTestFlightBuildJobs() (int, error) {
 		}
 		wasLinked := containsReleaseID(job.ReleaseIDs, release.ID)
 		if linkErr := a.linkStoredBuildRelease(job.ID, job.ProjectID, release.ID); linkErr != nil {
+			report.Skipped["link_failed"]++
 			if firstErr == nil {
 				firstErr = linkErr
 			}
 			continue
 		}
-		if !wasLinked {
-			repaired++
+		if wasLinked {
+			report.AlreadyLinked++
+		} else {
+			report.Reconciled++
 		}
 	}
-	return repaired, firstErr
+	if len(report.Skipped) == 0 {
+		report.Skipped = nil
+	}
+	return report, firstErr
 }
 
 func (a *App) publishTestFlightRelease(job BuildJob, profile ReleaseProfile, result BuildResult) (Release, error) {

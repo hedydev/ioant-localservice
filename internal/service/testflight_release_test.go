@@ -229,12 +229,12 @@ func TestReconcileTestFlightBuildJobsBackfillsMissingRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repaired, err := a.reconcileTestFlightBuildJobs()
+	report, err := a.reconcileTestFlightBuildJobs()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repaired != 1 || len(a.state.Releases) != 1 {
-		t.Fatalf("repaired=%d releases=%d, want 1/1", repaired, len(a.state.Releases))
+	if report.Reconciled != 1 || len(a.state.Releases) != 1 {
+		t.Fatalf("reconciled=%d releases=%d, want 1/1", report.Reconciled, len(a.state.Releases))
 	}
 	release := a.state.Releases[0]
 	if release.Delivery != "testflight" || release.Version != "0.1.0" || release.Build != 228 || release.BundleID != "com.ioant.sowhat" {
@@ -256,12 +256,12 @@ func TestReconcileTestFlightBuildJobsBackfillsMissingRelease(t *testing.T) {
 		t.Fatalf("release_ids = %#v, want [%s]", stored.ReleaseIDs, release.ID)
 	}
 
-	repaired, err = a.reconcileTestFlightBuildJobs()
+	report, err = a.reconcileTestFlightBuildJobs()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repaired != 0 || len(a.state.Releases) != 1 {
-		t.Fatalf("second reconcile repaired=%d releases=%d, want 0/1", repaired, len(a.state.Releases))
+	if report.Reconciled != 0 || len(a.state.Releases) != 1 {
+		t.Fatalf("second reconcile reconciled=%d releases=%d, want 0/1", report.Reconciled, len(a.state.Releases))
 	}
 }
 
@@ -312,12 +312,12 @@ func TestReconcileTestFlightBuildJobsUsesPersistedProfileSnapshot(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	repaired, err := a.reconcileTestFlightBuildJobs()
+	report, err := a.reconcileTestFlightBuildJobs()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repaired != 1 || len(a.state.Releases) != 1 {
-		t.Fatalf("repaired=%d releases=%d, want 1/1", repaired, len(a.state.Releases))
+	if report.Reconciled != 1 || len(a.state.Releases) != 1 {
+		t.Fatalf("reconciled=%d releases=%d, want 1/1", report.Reconciled, len(a.state.Releases))
 	}
 	release := a.state.Releases[0]
 	if release.Variant != job.ReleaseVariant || release.Channel != job.ReleaseChannel ||
@@ -366,15 +366,116 @@ func TestReconcileTestFlightBuildJobsRejectsUntrustedUploadResult(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	repaired, err := a.reconcileTestFlightBuildJobs()
+	report, err := a.reconcileTestFlightBuildJobs()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repaired != 0 || len(a.state.Releases) != 0 {
-		t.Fatalf("untrusted upload was recovered: repaired=%d releases=%d", repaired, len(a.state.Releases))
+	if report.Reconciled != 0 || len(a.state.Releases) != 0 {
+		t.Fatalf("untrusted upload was recovered: reconciled=%d releases=%d", report.Reconciled, len(a.state.Releases))
 	}
 }
 
+
+
+func TestReconcileTestFlightBuildJobsAcceptsLegacyMissingTopLevelLaneAndSchema(t *testing.T) {
+	data := t.TempDir()
+	a := &App{
+		data: data,
+		state: state{
+			Projects: []Project{{ID: "demo", Name: "Demo"}},
+			Releases: []Release{},
+		},
+	}
+	job := BuildJob{
+		ID:         "66666666666666666666666666666666",
+		ProjectID:  "demo",
+		Mode:       "profile",
+		ProfileID:  "ios-testflight",
+		Title:      "Legacy TestFlight",
+		Platform:   "ios",
+		Status:     "succeeded",
+		Stage:      "submitted",
+		StageState: "succeeded",
+		CreatedAt:  time.Now().UTC(),
+		Result: &BuildResult{
+			Lane:             "ios-testflight",
+			Status:           "submitted",
+			Platform:         "ios",
+			Version:          "0.1.0",
+			Build:            "224",
+			Architecture:     "arm64",
+			BundleID:     "com.ioant.sowhat",
+			Distribution: "app-store-connect",
+		},
+	}
+	path := a.buildJobPath(job.ID)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicJSON(path, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(filepath.Dir(path), "build.log"),
+		[]byte("ILS_EVENT {\"stage\":\"upload\",\"state\":\"succeeded\",\"message\":\"Upload accepted\"}\n"),
+		0600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := a.reconcileTestFlightBuildJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Scanned != 1 || report.Eligible != 1 || report.Reconciled != 1 {
+		t.Fatalf("legacy report = %#v", report)
+	}
+	if len(a.state.Releases) != 1 || a.state.Releases[0].Build != 224 {
+		t.Fatalf("legacy release was not recovered: %#v", a.state.Releases)
+	}
+}
+
+func TestReconcileReportExplainsMissingUploadEvidence(t *testing.T) {
+	data := t.TempDir()
+	a := &App{
+		data: data,
+		state: state{
+			Projects: []Project{{ID: "demo", Name: "Demo"}},
+			Releases: []Release{},
+		},
+	}
+	job := BuildJob{
+		ID:        "77777777777777777777777777777777",
+		ProjectID: "demo",
+		Lane:      "ios-testflight",
+		Result: &BuildResult{
+			SchemaVersion: 1,
+			Lane:          "ios-testflight",
+			Status:        "submitted",
+			Platform:      "ios",
+			Version:       "1.0.0",
+			Build:         "10",
+			Architecture:  "arm64",
+			BundleID:      "com.example.missing-evidence",
+			Distribution:  "app-store-connect",
+		},
+	}
+	path := a.buildJobPath(job.ID)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicJSON(path, job); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := a.reconcileTestFlightBuildJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Reconciled != 0 || report.Skipped["missing_upload_succeeded_evidence"] != 1 {
+		t.Fatalf("unexpected reconciliation report: %#v", report)
+	}
+}
 
 func TestPublishTestFlightReleaseDedupesByAppleBuildIdentity(t *testing.T) {
 	a := &App{
