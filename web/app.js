@@ -1,6 +1,6 @@
 import {initAppStoreConnect} from './js/app-store-connect.js';
 import {initPlatformUI} from './js/platform-ui.js';
-import {initCore} from './js/core.js';
+import {initCore,restoreAdminSession} from './js/core.js';
 import {initNavigation} from './js/navigation.js';
 import {initProjects} from './js/projects.js';
 import {initReleases} from './js/releases.js';
@@ -14,7 +14,6 @@ import {initAutomation} from './js/automation.js';
 initCore();
 initPlatformUI();
 initNavigation();
-initProjects();
 initReleases();
 initBuildSource();
 initBuildProfiles();
@@ -23,3 +22,6 @@ initIOS();
 initServices();
 initAppStoreConnect();
 initAutomation();
+
+await restoreAdminSession();
+initProjects();
