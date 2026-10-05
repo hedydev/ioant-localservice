@@ -11,11 +11,7 @@ function requestedView(){
 }
 
 function updateHeading(){
- if(state.view==='services'){
-  $('#project-title').textContent='ILS 全局功能';
-  $('#project-subtitle').textContent='设备与 OTA · 服务级配置，所有项目共用。';
-  return;
- }
+ if(state.view==='services')return;
  const project=state.projects.find(item=>item.id===state.project);
  $('#project-title').textContent=project?.name||'安装包分发';
  $('#project-subtitle').textContent=project?(project.id+' / '+labels[state.view]):'选择项目后查看构建与发布信息。';
@@ -35,6 +31,22 @@ function updateNavigationSelection(){
  });
 }
 
+function updatePageShell(){
+ const global=state.view==='services';
+ const projectHeading=document.querySelector('main > .page-heading');
+ const workspaceTabs=$('#workspace-tabs');
+ if(projectHeading){
+  projectHeading.hidden=global;
+  projectHeading.style.display=global?'none':'';
+ }
+ if(workspaceTabs){
+  workspaceTabs.hidden=global;
+  // .workspace-tabs sets display:flex, which otherwise overrides the browser's
+  // default [hidden] rule. Inline display keeps the global page truly separate.
+  workspaceTabs.style.display=global?'none':'';
+ }
+}
+
 export function activateView(requested,{updateHash=true}={}){
  let view=validViews.has(requested)?requested:'overview';
  if(adminViews.has(view)&&!state.admin)view='overview';
@@ -46,7 +58,7 @@ export function activateView(requested,{updateHash=true}={}){
  document.querySelectorAll('#workspace-tabs [data-view]').forEach(button=>{
   button.setAttribute('aria-pressed',String(button.dataset.view===view));
  });
- $('#workspace-tabs').hidden=view==='services';
+ updatePageShell();
  updateHeading();
  updateNavigationSelection();
 
