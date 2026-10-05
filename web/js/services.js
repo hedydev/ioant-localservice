@@ -96,7 +96,7 @@ function renderDevices(){
   const statusClass=registeredTeams.length?'config-ok':device.status==='apple_registration_attention'?'config-error':'config-warning';
   const actions=signingTeams.length
    ?'<div class="persistent-config-actions">'+
-      '<label style="margin:0;min-width:260px">Apple Team<select data-device-team="'+escapeHTML(device.udid)+'">'+teamOptions+'</select></label>'+
+      '<label>Apple Team<select data-device-team="'+escapeHTML(device.udid)+'">'+teamOptions+'</select></label>'+
       '<button type="button" data-apple-register="'+escapeHTML(device.udid)+'">注册到 Apple / 刷新状态</button>'+
      '</div>'
    :'<p class="config-warning">这台 Mac 没有检测到可用的 Apple 签名 Team，无法确定 Ad Hoc 使用哪个 Team。</p>';
