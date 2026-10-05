@@ -238,6 +238,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/devices/enroll.mobileconfig", a.enrollmentProfile)
 	mux.HandleFunc("POST /api/devices/callback/{challenge}", a.enrollmentCallback)
 	mux.HandleFunc("GET /api/devices", a.listDevices)
+	mux.HandleFunc("POST /api/devices/{udid}/apple-register", a.registerDeviceWithApple)
 	mux.HandleFunc("GET /api/ota-gateway/config", a.otaGatewayConfig)
 	mux.HandleFunc("POST /api/ota-gateway/check", a.otaGatewayCheck)
 	mux.HandleFunc("POST /api/ota-gateway/sync-devices", a.otaGatewaySyncDevices)
