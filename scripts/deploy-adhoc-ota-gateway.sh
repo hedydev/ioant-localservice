@@ -204,7 +204,10 @@ if ! command -v openssl >/dev/null 2>&1; then
 fi
 
 sudo install -d -o "$OWNER" -g www-data -m 0755 "$REMOTE_ROOT" "$REMOTE_ROOT/releases"
-sudo install -d -o "$OWNER" -g "$OWNER" -m 0700 /var/lib/ils-ota-gateway /var/lib/ils-ota-gateway/devices
+sudo install -d -o "$OWNER" -g "$OWNER" -m 0700 \
+  /var/lib/ils-ota-gateway \
+  /var/lib/ils-ota-gateway/devices \
+  /var/lib/ils-ota-gateway/challenges
 sudo install -d -o root -g "$OWNER" -m 0750 /etc/ils-ota-gateway
 sudo install -o root -g root -m 0755 "$REMOTE_BIN_TMP" /usr/local/bin/ils-ota-gateway
 sudo install -o root -g "$OWNER" -m 0640 "$REMOTE_TOKEN_TMP" /etc/ils-ota-gateway/sync-token
@@ -266,9 +269,10 @@ server {
     }
 
     location = /_ils/health {
-        default_type application/json;
-        add_header Cache-Control "no-store" always;
-        return 200 '{"ok":true,"service":"ils-adhoc-ota"}';
+        proxy_pass http://127.0.0.1:8790;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     }
 
     location = /enroll {
@@ -361,6 +365,13 @@ sudo certbot --nginx \
   --keep-until-expiring \
   --email "$EMAIL" \
   -d "$DOMAIN"
+
+# Certbot may keep an already-valid certificate without rewriting a freshly
+# regenerated HTTP-only site. Explicitly reinstall the existing lineage so
+# repeated deployments cannot silently drop the domain's TLS vhost.
+sudo certbot install \
+  --non-interactive \
+  --cert-name "$DOMAIN"
 
 sudo nginx -t
 sudo systemctl reload nginx
