@@ -24,7 +24,12 @@ import (
 	"time"
 )
 
-var udidRE = regexp.MustCompile("^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{8}-[0-9a-fA-F]{16})$")
+const challengeTTL = time.Hour
+
+var (
+	udidRE      = regexp.MustCompile("^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{8}-[0-9a-fA-F]{16})$")
+	challengeRE = regexp.MustCompile("^[0-9a-f]{48}$")
+)
 
 type pendingDevice struct {
 	ID          string    `json:"id"`
@@ -88,6 +93,11 @@ func (g *gateway) securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+func (g *gateway) health(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "ils-adhoc-ota"})
+}
+
 func (g *gateway) enrollPage(w http.ResponseWriter, r *http.Request) {
 	collected := r.URL.Query().Get("collected") == "1"
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -102,24 +112,100 @@ func (g *gateway) enrollPage(w http.ResponseWriter, r *http.Request) {
 		"h1{font-size:24px;margin:0 0 10px}p{line-height:1.65;color:#536577}a.button{display:inline-block;margin-top:10px;padding:12px 16px;border-radius:10px;background:#182736;color:#fff;text-decoration:none;font-weight:650}" +
 		"small{display:block;margin-top:18px;color:#7a8794;line-height:1.55}.ok{padding:12px 14px;border-radius:10px;background:#eef7f1;color:#246e52;margin-bottom:16px}</style></head>" +
 		"<body><main><div class=\"card\">" + status + "<h1>登记这台 iPhone / iPad</h1><p>ILS 只收集 UDID、设备型号和 iOS 版本，用于管理员登记 Ad Hoc 测试设备。不会安装 MDM、根证书或授予额外设备权限。</p>" +
-		"<a class=\"button\" href=\"/enroll.mobileconfig\">下载设备登记描述文件</a><small>下载后请在“设置”中安装已下载的描述文件。登记链接 15 分钟内有效，并且只能成功使用一次。</small></div></main></body></html>"
+		"<a class=\"button\" href=\"/enroll.mobileconfig\">下载设备登记描述文件</a><small>下载后请在“设置”中安装已下载的描述文件。登记链接 1 小时内有效，并且只能成功使用一次。</small></div></main></body></html>"
 	_, _ = io.WriteString(w, page)
+}
+
+func (g *gateway) challengeDir() string {
+	return filepath.Join(g.data, "challenges")
+}
+
+func (g *gateway) challengePath(challenge string) string {
+	return filepath.Join(g.challengeDir(), challenge+".challenge")
+}
+
+func (g *gateway) loadChallengeLocked(challenge string) (time.Time, bool) {
+	if !challengeRE.MatchString(challenge) {
+		return time.Time{}, false
+	}
+	now := time.Now()
+	if expires, ok := g.challenges[challenge]; ok {
+		if now.Before(expires) {
+			return expires, true
+		}
+		delete(g.challenges, challenge)
+		_ = os.Remove(g.challengePath(challenge))
+		return time.Time{}, false
+	}
+	raw, err := os.ReadFile(g.challengePath(challenge))
+	if err != nil {
+		return time.Time{}, false
+	}
+	expires, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(raw)))
+	if err != nil || !now.Before(expires) {
+		_ = os.Remove(g.challengePath(challenge))
+		return time.Time{}, false
+	}
+	if g.challenges == nil {
+		g.challenges = map[string]time.Time{}
+	}
+	g.challenges[challenge] = expires
+	return expires, true
+}
+
+func (g *gateway) challengeValid(challenge string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, ok := g.loadChallengeLocked(challenge)
+	return ok
 }
 
 func (g *gateway) newChallenge() (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	now := time.Now()
-	for key, expires := range g.challenges {
-		if now.After(expires) {
-			delete(g.challenges, key)
-		}
+
+	dir := g.challengeDir()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
 	}
-	if len(g.challenges) >= 256 {
+	now := time.Now()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	active := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".challenge") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		raw, readErr := os.ReadFile(path)
+		expires, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(raw)))
+		if readErr != nil || parseErr != nil || !now.Before(expires) {
+			_ = os.Remove(path)
+			continue
+		}
+		active++
+	}
+	if active >= 256 {
 		return "", fmt.Errorf("too many enrollment requests")
 	}
+
 	challenge := randomHex(24)
-	g.challenges[challenge] = now.Add(15 * time.Minute)
+	expires := now.Add(challengeTTL).UTC()
+	path := g.challengePath(challenge)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(expires.Format(time.RFC3339Nano)+"\n"), 0600); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	if g.challenges == nil {
+		g.challenges = map[string]time.Time{}
+	}
+	g.challenges[challenge] = expires
 	return challenge, nil
 }
 
@@ -185,9 +271,10 @@ func parsePlistStrings(raw []byte) (map[string]string, error) {
 func (g *gateway) consumeChallenge(challenge string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	expires, ok := g.challenges[challenge]
-	if !ok || time.Now().After(expires) {
-		delete(g.challenges, challenge)
+	if _, ok := g.loadChallengeLocked(challenge); !ok {
+		return false
+	}
+	if err := os.Remove(g.challengePath(challenge)); err != nil {
 		return false
 	}
 	delete(g.challenges, challenge)
@@ -196,10 +283,7 @@ func (g *gateway) consumeChallenge(challenge string) bool {
 
 func (g *gateway) callback(w http.ResponseWriter, r *http.Request) {
 	challenge := r.PathValue("challenge")
-	g.mu.Lock()
-	expires, exists := g.challenges[challenge]
-	g.mu.Unlock()
-	if !exists || time.Now().After(expires) {
+	if !g.challengeValid(challenge) {
 		fail(w, http.StatusGone, "登记链接已过期，请重新下载描述文件")
 		return
 	}
@@ -251,7 +335,7 @@ func (g *gateway) callback(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "设备信息保存失败")
 		return
 	}
-	http.Redirect(w, r, g.publicURL+"/enroll?collected=1", http.StatusSeeOther)
+	http.Redirect(w, r, g.publicURL+"/enroll?collected=1", http.StatusMovedPermanently)
 }
 
 func (g *gateway) pending(w http.ResponseWriter, r *http.Request) {
@@ -317,6 +401,9 @@ func main() {
 	if err = os.MkdirAll(filepath.Join(*data, "devices"), 0700); err != nil {
 		log.Fatal(err)
 	}
+	if err = os.MkdirAll(filepath.Join(*data, "challenges"), 0700); err != nil {
+		log.Fatal(err)
+	}
 	g := &gateway{
 		publicURL:  *publicURL,
 		data:       *data,
@@ -325,6 +412,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_ils/health", g.health)
 	mux.HandleFunc("GET /enroll", g.enrollPage)
 	mux.HandleFunc("GET /enroll.mobileconfig", g.profile)
 	mux.HandleFunc("POST /device/callback/{challenge}", g.callback)
