@@ -4,7 +4,23 @@ import {refreshData} from './projects.js';
 let gatewayConfigured=false;
 let gatewaySyncing=false;
 
+function isIOSDevice(){
+ const ua=navigator.userAgent||'';
+ if(/iPhone|iPad|iPod/i.test(ua))return true;
+ // iPadOS can expose a desktop-style MacIntel user agent.
+ return navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1;
+}
+
+function updateEnrollmentVisibility(){
+ const link=$('#enroll-device-link');
+ const card=link?.closest('article');
+ const visible=isIOSDevice();
+ if(card)card.hidden=!visible;
+ return visible;
+}
+
 async function checkEnrollmentAvailability(){
+ if(!updateEnrollmentVisibility())return;
  try{
   const health=await api('/api/health');
   const link=$('#enroll-device-link');
@@ -12,17 +28,17 @@ async function checkEnrollmentAvailability(){
    link.href=health.public_enrollment_url;
    link.removeAttribute('aria-disabled');
    link.classList.remove('disabled-link');
-   $('#enrollment-availability').textContent='公网设备登记已启用。iPhone / iPad 可直接访问 OTA Gateway，不需要和这台 Mac 位于同一局域网。';
+   $('#enrollment-availability').textContent='公网设备登记已启用。此 iPhone / iPad 可直接访问 OTA Gateway。';
   }else if(health.ota_configured){
    link.href='/api/devices/enroll.mobileconfig';
    link.removeAttribute('aria-disabled');
    link.classList.remove('disabled-link');
-   $('#enrollment-availability').textContent='本地 HTTPS 设备登记入口已启用。请使用 iPhone / iPad 的 Safari 打开此页面并安装登记描述文件。';
+   $('#enrollment-availability').textContent='本地 HTTPS 设备登记入口已启用。请安装登记描述文件。';
   }else{
    link.removeAttribute('href');
    link.setAttribute('aria-disabled','true');
    link.classList.add('disabled-link');
-   $('#enrollment-availability').textContent='当前 ILS 尚未配置公网 OTA Gateway 或受 iPhone 信任的本地 HTTPS public-url，因此设备登记暂不可用。';
+   $('#enrollment-availability').textContent='当前 ILS 尚未配置可用的设备登记入口。';
   }
  }catch(error){
   $('#enrollment-availability').textContent='无法读取设备登记状态：'+error.message;
@@ -129,6 +145,8 @@ function resetGlobalServices(){
 }
 
 export function initServices(){
+ updateEnrollmentVisibility();
+
  $('#devices-button').onclick=async()=>{
   if(!needAdmin())return;
   try{
@@ -171,7 +189,7 @@ export function initServices(){
   syncGatewayDevices({silent:true});
  },30000);
 
- if(new URLSearchParams(location.search).get('enrollment')==='collected'){
+ if(isIOSDevice()&&new URLSearchParams(location.search).get('enrollment')==='collected'){
   notice('设备信息已提交。管理员还需要在 Apple Developer Team 中注册这台设备并重新发布 Ad Hoc 包，之后才能安装。');
  }
 
