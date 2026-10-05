@@ -439,6 +439,10 @@ func otaSSHOptions(cfg OTAGatewayConfig) []string {
 	}
 }
 
+func otaFinalizeRemoteCommand(stageDir, remoteDir string) string {
+	return "chmod 0644 -- " + stageDir + "/app.ipa " + stageDir + "/manifest.plist && rm -rf -- " + remoteDir + " && mv -- " + stageDir + " " + remoteDir
+}
+
 func (a *App) syncReleaseToOTAGateway(ctx context.Context, id string) (Release, error) {
 	a.otaArtifactMu.Lock()
 	defer a.otaArtifactMu.Unlock()
@@ -524,7 +528,7 @@ func (a *App) syncReleaseToOTAGateway(ctx context.Context, id string) (Release, 
 		cleanup()
 		return failed("failed to upload OTA manifest")
 	}
-	finalizeArgs := append(append([]string{}, sshOptions...), target, "rm -rf -- "+remoteDir+" && mv -- "+stageDir+" "+remoteDir)
+	finalizeArgs := append(append([]string{}, sshOptions...), target, otaFinalizeRemoteCommand(stageDir, remoteDir))
 	if e = runOTACommand(ctx, "ssh", finalizeArgs...); e != nil {
 		cleanup()
 		return failed("failed to finalize OTA Gateway release directory")
