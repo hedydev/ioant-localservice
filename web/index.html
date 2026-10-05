@@ -22,7 +22,11 @@
 
 <div class="layout">
 <aside>
-  <div class="section-label">项目空间 <button data-admin hidden id="new-project" class="icon-button" aria-label="新建项目">＋</button></div>
+  <div class="section-label">全局功能</div>
+  <nav id="global-services-nav" aria-label="全局功能">
+    <button id="global-services-button" data-global-view="services">设备与 OTA<small>全项目共用</small></button>
+  </nav>
+  <div class="section-label" style="margin-top:28px">项目空间 <button data-admin hidden id="new-project" class="icon-button" aria-label="新建项目">＋</button></div>
   <nav id="projects" aria-label="项目"></nav>
   <div class="aside-note">每一个构建，都有迹可循。<br>发布记录统一管理，本地产物保存在这台 Mac 上。</div>
 </aside>
@@ -45,6 +49,43 @@
     <button data-view="ios" aria-pressed="false"><span data-platform-targets="iphone ipad"></span>iOS 发布</button>
     <button data-view="automation" data-admin hidden aria-pressed="false">自动化 / API</button>
   </nav>
+
+  <section id="view-services" class="workspace-view" data-view-panel="services" hidden>
+    <div class="view-heading">
+      <div><h2>设备与 OTA</h2><p>ILS 服务级能力，所有项目共用，不依赖当前项目。</p></div>
+    </div>
+
+    <article class="panel-card">
+      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>设备登记入口</h2><span class="meta">全局 · 无需管理员密钥</span></div></div>
+      <p>新 iPhone / iPad 只需登记一次。ILS 收集 UDID、设备型号和 iOS 版本，供所有 Ad Hoc 项目复用；不会安装根证书或 MDM。</p>
+      <div class="download-row">
+        <a id="enroll-device-link" class="download" href="/api/devices/enroll.mobileconfig">登记这台 iPhone / iPad</a>
+      </div>
+      <p id="enrollment-availability" class="meta">正在检查设备登记条件…</p>
+      <p class="meta">登记成功后，管理员仍需要在 Apple Developer Team 中注册该设备并重新导出包含该 UDID 的 Ad Hoc IPA。</p>
+    </article>
+
+    <article class="panel-card" data-admin hidden>
+      <div class="section-heading"><div><h2>设备管理</h2><span class="meta">管理员 · 全局 Device Registry</span></div></div>
+      <p>这里显示本地登记与公网 OTA Gateway 同步回来的完整 UDID。设备记录属于 ILS 全局，不属于任何单个项目。</p>
+      <div class="persistent-config-actions">
+        <button id="devices-button" type="button">刷新设备列表</button>
+        <button id="ota-sync-devices" type="button">同步公网设备</button>
+      </div>
+      <pre id="devices-list">正在读取设备…</pre>
+    </article>
+
+    <article class="panel-card" data-admin hidden>
+      <div class="section-heading"><div><h2>OTA Gateway</h2><span class="meta">管理员 · ILS 全局基础设施</span></div></div>
+      <p>Public Device Enrollment 与 Ad Hoc Artifact Sync 共用同一个公网 Gateway；所有项目共用相同 Gateway 配置。</p>
+      <div id="ota-gateway-status" role="status">正在读取 OTA Gateway 配置…</div>
+      <div class="persistent-config-actions">
+        <button id="ota-gateway-check" type="button">验证 Gateway</button>
+        <button id="ota-sync-artifacts" type="button">同步全部 Ad Hoc 发布</button>
+      </div>
+      <p class="meta">Gateway 属于 ILS 服务级配置。部署脚本写入本机 <code>.localservice/ota-gateway.json</code>，sync token 不会返回到浏览器。</p>
+    </article>
+  </section>
 
   <section id="view-overview" class="workspace-view" data-view-panel="overview">
     <div class="view-heading">
@@ -120,48 +161,17 @@
 
   <section id="view-ios" class="workspace-view" data-view-panel="ios" hidden>
     <div class="view-heading">
-      <div><h2><span data-platform-targets="iphone ipad"></span>iOS 发布</h2><p>Ad Hoc 与 TestFlight 都是 iOS 发布；区别只在交付方式。</p></div>
+      <div><h2><span data-platform-targets="iphone ipad"></span>iOS 发布</h2><p>当前项目的 Ad Hoc 与 TestFlight 发布；设备与 OTA 基础设施在全局功能中管理。</p></div>
       <button type="button" data-go-view="builds" data-admin hidden>查看 iOS Release Profiles</button>
     </div>
 
     <article class="panel-card">
-      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>登记这台设备</h2><span class="meta">无需管理员密钥</span></div></div>
-      <p>第一次使用的新 iPhone / iPad，需要先把设备信息提交给管理员。登记只收集 UDID、设备型号和 iOS 版本，不安装根证书或 MDM。</p>
-      <div class="download-row">
-        <a id="enroll-device-link" class="download" href="/api/devices/enroll.mobileconfig">登记这台 iPhone / iPad</a>
-      </div>
-      <p id="enrollment-availability" class="meta">正在检查设备登记条件…</p>
-      <p class="meta">提交设备信息后，管理员仍需要在 Apple Developer Team 中注册该设备并重新导出 Ad Hoc IPA。登记成功不代表当前已有的 IPA 会自动支持这台新设备。</p>
-    </article>
-
-    <article class="panel-card">
-      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>iOS 发布</h2><span class="meta">Ad Hoc / TestFlight</span></div></div>
+      <div class="section-heading"><div><h2><span data-platform-targets="iphone ipad"></span>iOS 发布</h2><span class="meta">当前项目 · Ad Hoc / TestFlight</span></div></div>
       <div id="ios-install-releases"></div>
     </article>
 
     <article class="panel-card" data-admin hidden>
-      <div class="section-heading"><div><h2>设备管理</h2><span class="meta">管理员 · 全局 Device Registry</span></div></div>
-      <p>这里会显示本地登记与公网 OTA Gateway 同步回来的完整 UDID，仅管理员可见。</p>
-      <div class="persistent-config-actions">
-        <button id="devices-button" type="button">查看登记设备</button>
-        <button id="ota-sync-devices" type="button">同步公网设备</button>
-      </div>
-      <pre id="devices-list" hidden></pre>
-    </article>
-
-    <article class="panel-card" data-admin hidden>
-      <div class="section-heading"><div><h2>OTA Gateway</h2><span class="meta">管理员 · 全项目通用</span></div></div>
-      <p>Public Device Enrollment 与 Ad Hoc Artifact Sync 共用同一个公网 Gateway；ILS 主动拉取设备，IPA/manifest 通过 SSH 同步到 Gateway。</p>
-      <div id="ota-gateway-status" role="status">正在读取 OTA Gateway 配置…</div>
-      <div class="persistent-config-actions">
-        <button id="ota-gateway-check" type="button">验证 Gateway</button>
-        <button id="ota-sync-artifacts" type="button">同步 Ad Hoc 发布</button>
-      </div>
-      <p class="meta">Gateway 属于 ILS 服务级配置，不属于当前项目。部署脚本会写入本机 <code>.localservice/ota-gateway.json</code>，sync token 不会返回到浏览器。</p>
-    </article>
-
-    <article class="panel-card" data-admin hidden>
-      <div class="section-heading"><div><h2><span data-platform-targets="mac"></span>Mac 签名服务</h2><span class="meta">管理员 · 兼容流程</span></div></div>
+      <div class="section-heading"><div><h2><span data-platform-targets="mac"></span>Mac 签名服务</h2><span class="meta">管理员 · 当前项目兼容流程</span></div></div>
       <p>使用 ILS 已配置的 Xcode archive 进行签名与发布。新的项目发布优先使用 Release Profile。</p>
       <button id="sign-button">请求 Mac 签名</button>
       <p id="sign-state" role="status"></p>
