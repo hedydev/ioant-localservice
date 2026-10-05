@@ -10,6 +10,22 @@ export const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&a
 export const formatSize=bytes=>bytes>=1073741824?(bytes/1073741824).toFixed(2)+' GB':(bytes/1048576).toFixed(1)+' MB';
 export const formatDate=value=>new Date(value).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 
+const adminTokenStorageKey='ils.admin-token';
+
+function readCachedAdminToken(){
+ try{return (window.localStorage.getItem(adminTokenStorageKey)||'').trim();}
+ catch{return '';}
+}
+
+function writeCachedAdminToken(token){
+ try{
+  if(token)window.localStorage.setItem(adminTokenStorageKey,token);
+  else window.localStorage.removeItem(adminTokenStorageKey);
+ }catch{
+  // Browser storage may be unavailable; the in-memory admin session still works.
+ }
+}
+
 export async function api(path,options={}){
  const epoch=state.authEpoch;
  const response=await fetch(path,{...options,headers:{...(state.admin?{Authorization:'Bearer '+state.token}:{}),...options.headers}});
@@ -61,6 +77,7 @@ export function setAdmin(authenticated,token=''){
  state.admin=authenticated;
  state.token=authenticated?token:'';
  state.job=null;
+ writeCachedAdminToken(authenticated?token:'');
 
  document.querySelectorAll('[data-admin]').forEach(el=>{
   if(!authenticated&&el.tagName==='DIALOG'&&el.open)el.close();
@@ -82,6 +99,25 @@ export function setAdmin(authenticated,token=''){
  window.dispatchEvent(new CustomEvent('admin-changed',{detail:{authenticated}}));
 }
 
+async function restoreAdminSession(){
+ const token=readCachedAdminToken();
+ if(!token)return;
+ const button=$('#admin-button');
+ button.disabled=true;
+ button.textContent='恢复管理状态…';
+ try{
+  const response=await fetch('/api/admin/session',{headers:{Authorization:'Bearer '+token}});
+  const result=await response.json();
+  if(!response.ok||result.authenticated!==true)throw new Error(result.error||'管理员验证已失效');
+  setAdmin(true,token);
+ }catch{
+  setAdmin(false);
+ }finally{
+  button.disabled=false;
+  if(!state.admin)button.textContent='管理员验证';
+ }
+}
+
 export function initCore(){
  $('#admin-button').onclick=()=>$('#admin-dialog').showModal();
 
@@ -101,7 +137,7 @@ export function initCore(){
    $('#token').value='';
    $('#admin-dialog').close();
    setAdmin(true,token);
-   notice('管理员验证成功。');
+   notice('管理员验证成功，已记住在此浏览器。');
   }catch(error){
    $('#token').value='';
    $('#admin-error').textContent=error.message;
@@ -112,7 +148,7 @@ export function initCore(){
 
  $('#logout-button').onclick=()=>{
   setAdmin(false);
-  notice('已退出管理，现在仅显示已发布安装包。');
+  notice('已退出管理，并清除本地登录状态。');
  };
  $('#admin-dialog').addEventListener('close',()=>{
   adminAttempt++;
@@ -121,4 +157,6 @@ export function initCore(){
  document.querySelectorAll('[data-close]').forEach(button=>{
   button.onclick=()=>button.closest('dialog').close();
  });
+
+ restoreAdminSession();
 }
