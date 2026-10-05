@@ -2,7 +2,7 @@
 import {$,state} from './core.js';
 
 const validViews=new Set(['services','overview','builds','releases','ios','automation']);
-const adminViews=new Set(['builds','automation']);
+const adminViews=new Set(['services','builds','automation']);
 const labels={overview:'项目概览',builds:'构建与发布',releases:'版本历史',ios:'iOS 发布',automation:'自动化 / API'};
 
 function requestedView(){
@@ -31,6 +31,20 @@ function updateNavigationSelection(){
  });
 }
 
+function updateGlobalNavigationVisibility(){
+ const globalNav=$('#global-services-nav');
+ const globalLabel=globalNav?.previousElementSibling;
+ const projectLabel=$('#projects')?.previousElementSibling;
+ const visible=state.admin;
+
+ [globalLabel,globalNav].forEach(element=>{
+  if(!element)return;
+  element.hidden=!visible;
+  element.style.display=visible?'':'none';
+ });
+ if(projectLabel)projectLabel.style.marginTop=visible?'28px':'0';
+}
+
 function updatePageShell(){
  const global=state.view==='services';
  const projectHeading=document.querySelector('main > .page-heading');
@@ -41,8 +55,6 @@ function updatePageShell(){
  }
  if(workspaceTabs){
   workspaceTabs.hidden=global;
-  // .workspace-tabs sets display:flex, which otherwise overrides the browser's
-  // default [hidden] rule. Inline display keeps the global page truly separate.
   workspaceTabs.style.display=global?'none':'';
  }
 }
@@ -67,6 +79,8 @@ export function activateView(requested,{updateHash=true}={}){
 }
 
 export function initNavigation(){
+ updateGlobalNavigationVisibility();
+
  $('#workspace-tabs').addEventListener('click',event=>{
   const button=event.target.closest('[data-view]');
   if(button)activateView(button.dataset.view);
@@ -92,8 +106,12 @@ export function initNavigation(){
   updateHeading();
   updateNavigationSelection();
  });
- window.addEventListener('admin-loaded',()=>activateView(requestedView()));
+ window.addEventListener('admin-loaded',()=>{
+  updateGlobalNavigationVisibility();
+  activateView(requestedView());
+ });
  window.addEventListener('admin-cleared',()=>{
+  updateGlobalNavigationVisibility();
   if(adminViews.has(state.view))activateView('overview');
   else activateView(state.view);
  });
