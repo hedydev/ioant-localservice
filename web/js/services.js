@@ -137,7 +137,7 @@ async function registerDeviceWithApple(udid,button){
  const old=button.textContent;
  button.textContent='正在联系 Apple…';
  try{
-  await api('/api/devices/'+encodeURIComponent(udid)+'/apple-register',{
+  await api('/api/apple-devices/'+encodeURIComponent(udid)+'/register',{
    method:'POST',
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify({team_id:teamID})
