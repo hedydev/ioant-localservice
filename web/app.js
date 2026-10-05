@@ -8,6 +8,7 @@ import {initBuildSource} from './js/build-source.js';
 import {initBuildProfiles} from './js/build-profiles.js';
 import {initBuildJobs} from './js/build-jobs.js';
 import {initIOS} from './js/ios.js';
+import {initServices} from './js/services.js';
 import {initAutomation} from './js/automation.js';
 
 initCore();
@@ -19,5 +20,6 @@ initBuildSource();
 initBuildProfiles();
 initBuildJobs();
 initIOS();
+initServices();
 initAppStoreConnect();
 initAutomation();
