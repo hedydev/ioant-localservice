@@ -1,6 +1,5 @@
 import {$,state,api,escapeHTML,notice,needAdmin} from './core.js';
 import {refreshData} from './projects.js';
-import {platformIcons} from './platform-ui.js';
 import {renderReleaseCard} from './release-ui.js';
 
 function filteredReleases(){
@@ -11,25 +10,46 @@ function filteredReleases(){
  );
 }
 
-function renderOverview(){
- const iosCount=state.releases.filter(item=>item.platform==='ios').length;
- const macCount=state.releases.filter(item=>item.platform==='macos').length;
- $('#overview-stats').innerHTML=[
-  ['全部版本',state.releases.length,[]],
-  ['iOS',iosCount,['iphone','ipad']],
-  ['macOS',macCount,['mac']]
- ].map(item=>'<div class="overview-stat"><strong>'+item[1]+'</strong><span>'+platformIcons(item[2])+item[0]+'</span></div>').join('');
+function releaseTime(release){
+ const value=Date.parse(release.created_at||'');
+ return Number.isFinite(value)?value:0;
+}
 
- const latestByPlatform=['ios','macos']
-  .map(platform=>state.releases.find(release=>release.platform===platform))
-  .filter(Boolean);
- if(!latestByPlatform.length){
-  $('#overview-latest').innerHTML='<div class="empty"><strong>暂无发布</strong>发布完成后，各平台最新 Release 会显示在这里。</div>';
+function currentDistributionKey(release){
+ const variant=release.variant||'default';
+ if(release.delivery==='testflight')return 'ios:testflight';
+ if(release.platform==='ios')return 'ios:adhoc:'+variant;
+ if(release.platform==='macos')return 'macos:'+variant+':'+(release.architecture||'');
+ return (release.platform||'other')+':'+(release.delivery||'artifact')+':'+variant;
+}
+
+function currentDistributions(){
+ const latest=new Map();
+ [...state.releases]
+  .sort((a,b)=>releaseTime(b)-releaseTime(a))
+  .forEach(release=>{
+   const key=currentDistributionKey(release);
+   if(!latest.has(key))latest.set(key,release);
+  });
+ return [...latest.values()].sort((a,b)=>releaseTime(b)-releaseTime(a));
+}
+
+function renderOverview(){
+ const current=currentDistributions();
+ const versions=new Set(state.releases.map(item=>String(item.version||'').trim()).filter(Boolean));
+ $('#overview-stats').innerHTML=[
+  ['发布记录',state.releases.length],
+  ['当前分发',current.length],
+  ['版本',versions.size]
+ ].map(item=>'<div class="overview-stat"><strong>'+item[1]+'</strong><span>'+escapeHTML(item[0])+'</span></div>').join('');
+
+ if(!current.length){
+  $('#overview-latest').innerHTML='<div class="empty"><strong>暂无发布</strong>发布完成后，当前可交付的 Release 会显示在这里；历史记录统一放在“版本历史”。</div>';
   return;
  }
- $('#overview-latest').innerHTML='<div class="overview-latest-grid">'+
-  latestByPlatform.map(release=>renderReleaseCard(release,{featured:true})).join('')+
- '</div>';
+ $('#overview-latest').innerHTML=''+
+  '<div class="section-heading overview-current-heading"><div><h2>当前分发</h2><span class="meta">每种分发方式只显示最新一条；完整旧版本请到“版本历史”查看。</span></div></div>'+
+  '<div class="overview-latest-grid">'+current.map(release=>renderReleaseCard(release,{featured:true})).join('')+'</div>';
 }
 
 function renderReleaseHistory(){
