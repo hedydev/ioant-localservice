@@ -130,21 +130,21 @@ func TestBuildUploadAttributesAcceptsNestedAndLegacyState(t *testing.T) {
 		wantInfos    int
 	}{
 		{
-			name: "current nested state",
-			raw: `{"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"228","platform":"IOS","state":{"state":"PROCESSING","errors":[],"warnings":[{"code":"WARN"}],"infos":[{"message":"Processing"}]}}`,
-			wantState: "PROCESSING",
+			name:         "current nested state",
+			raw:          `{"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"228","platform":"IOS","state":{"state":"PROCESSING","errors":[],"warnings":[{"code":"WARN"}],"infos":[{"message":"Processing"}]}}`,
+			wantState:    "PROCESSING",
 			wantWarnings: 1,
-			wantInfos: 1,
+			wantInfos:    1,
 		},
 		{
-			name: "failed nested state",
-			raw: `{"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"229","platform":"IOS","state":{"state":"FAILED","errors":[{"code":"ERR1"},{"code":"ERR2"}],"warnings":[],"infos":[]}}`,
-			wantState: "FAILED",
+			name:       "failed nested state",
+			raw:        `{"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"229","platform":"IOS","state":{"state":"FAILED","errors":[{"code":"ERR1"},{"code":"ERR2"}],"warnings":[],"infos":[]}}`,
+			wantState:  "FAILED",
 			wantErrors: 2,
 		},
 		{
-			name: "legacy string state",
-			raw: `{"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"224","platform":"IOS","state":"COMPLETE"}`,
+			name:      "legacy string state",
+			raw:       `{"cfBundleShortVersionString":"0.1.0","cfBundleVersion":"224","platform":"IOS","state":"COMPLETE"}`,
 			wantState: "COMPLETE",
 		},
 	}
@@ -206,13 +206,13 @@ func TestBuildUploadState(t *testing.T) {
 
 func TestBetaStateLabel(t *testing.T) {
 	tests := map[string]string{
-		"READY_FOR_BETA_TESTING":   "Ready for Testing",
-		"IN_BETA_TESTING":          "Testing",
-		"READY_FOR_BETA_SUBMISSION":"Ready to Submit",
-		"WAITING_FOR_BETA_REVIEW":  "Waiting for Review",
-		"IN_BETA_REVIEW":           "In Review",
-		"BETA_APPROVED":            "Approved",
-		"BETA_REJECTED":            "Rejected",
+		"READY_FOR_BETA_TESTING":    "Ready for Testing",
+		"IN_BETA_TESTING":           "Testing",
+		"READY_FOR_BETA_SUBMISSION": "Ready to Submit",
+		"WAITING_FOR_BETA_REVIEW":   "Waiting for Review",
+		"IN_BETA_REVIEW":            "In Review",
+		"BETA_APPROVED":             "Approved",
+		"BETA_REJECTED":             "Rejected",
 	}
 	for raw, want := range tests {
 		if got := betaStateLabel(raw); got != want {
@@ -221,12 +221,12 @@ func TestBetaStateLabel(t *testing.T) {
 	}
 }
 
-func TestTestFlightStateInternalReadyExternalReadyToSubmit(t *testing.T) {
+func TestTestFlightStateInternalReadyExternalReadyToSubmitIsProcessing(t *testing.T) {
 	status, message := testFlightState("VALID", "READY_FOR_BETA_TESTING", "READY_FOR_BETA_SUBMISSION", false)
-	if status != "available" {
-		t.Fatalf("status = %q, want available", status)
+	if status != "processing" {
+		t.Fatalf("status = %q, want processing", status)
 	}
-	const want = "Internal Testing: Ready for Testing · External Testing: Ready to Submit"
+	const want = "External Testing: Ready to Submit"
 	if message != want {
 		t.Fatalf("message = %q, want %q", message, want)
 	}
@@ -270,6 +270,7 @@ func TestTestFlightState(t *testing.T) {
 		{"processing", "PROCESSING", "", "", false, "processing"},
 		{"internal ready only", "VALID", "READY_FOR_BETA_TESTING", "", false, "processing"},
 		{"internal ready external not submitted", "VALID", "READY_FOR_BETA_TESTING", "READY_FOR_BETA_SUBMISSION", false, "processing"},
+		{"external approved", "VALID", "READY_FOR_BETA_TESTING", "BETA_APPROVED", false, "processing"},
 		{"external testing", "VALID", "", "IN_BETA_TESTING", false, "available"},
 		{"failed", "FAILED", "", "", false, "unavailable"},
 		{"compliance", "VALID", "MISSING_EXPORT_COMPLIANCE", "", false, "processing"},
@@ -285,7 +286,6 @@ func TestTestFlightState(t *testing.T) {
 		})
 	}
 }
-
 
 func TestAppStoreConnectBuildEnvOnlyInjectsTeamKeys(t *testing.T) {
 	a := &App{data: t.TempDir()}
