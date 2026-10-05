@@ -29,3 +29,17 @@
     width:100%;
   }
 }
+
+/* Keep sparse admin pages anchored to the top instead of vertically centering them. */
+main{margin:0 auto;align-self:start}
+
+/* Global device/OTA administration is a dedicated management layout. */
+#view-services:not([hidden]){display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr);gap:18px;align-items:start;max-width:1120px;margin:0 auto}
+#view-services>.view-heading{grid-column:1/-1;margin:0 0 4px;padding:2px 0 18px;border-bottom:1px solid var(--line)}
+#view-services>.view-heading h2{font-size:1.65rem;letter-spacing:-.5px}
+#view-services>.view-heading p{max-width:720px;margin-top:5px}
+#view-services>.panel-card{margin:0;min-width:0;height:100%}
+#view-services>.panel-card:not([data-admin]){grid-column:1/-1}
+#view-services #devices-list{max-height:420px;overflow:auto;margin-top:14px}
+#view-services #ota-gateway-status{padding:12px 14px;border:1px solid #e6ebf0;border-radius:9px;background:#f8fafb;font-size:.8125rem;overflow-wrap:anywhere}
+@media(max-width:980px){#view-services:not([hidden]){grid-template-columns:minmax(0,1fr)}}
