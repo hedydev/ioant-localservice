@@ -16,14 +16,26 @@ import (
 	"time"
 )
 
+type AppleDeviceRegistration struct {
+	TeamID        string     `json:"team_id"`
+	DeviceID      string     `json:"device_id,omitempty"`
+	Name          string     `json:"name,omitempty"`
+	Status        string     `json:"status"`
+	AppleStatus   string     `json:"apple_status,omitempty"`
+	RegisteredAt  *time.Time `json:"registered_at,omitempty"`
+	LastCheckedAt time.Time  `json:"last_checked_at"`
+	LastError     string     `json:"last_error,omitempty"`
+}
+
 type Device struct {
-	UDID             string    `json:"udid"`
-	Product          string    `json:"product"`
-	Version          string    `json:"version"`
-	CollectedAt      time.Time `json:"collected_at"`
-	Status           string    `json:"status"`
-	IdentityVerified bool      `json:"identity_verified"`
-	Source           string    `json:"source,omitempty"`
+	UDID               string                             `json:"udid"`
+	Product            string                             `json:"product"`
+	Version            string                             `json:"version"`
+	CollectedAt        time.Time                          `json:"collected_at"`
+	Status             string                             `json:"status"`
+	IdentityVerified   bool                               `json:"identity_verified"`
+	Source             string                             `json:"source,omitempty"`
+	AppleRegistrations map[string]AppleDeviceRegistration `json:"apple_registrations,omitempty"`
 }
 
 var udidRE = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{8}-[0-9a-fA-F]{16})$`)
@@ -104,17 +116,50 @@ func (a *App) enrollmentCallback(w http.ResponseWriter, r *http.Request) {
 	delete(a.enrollments, challenge)
 	http.Redirect(w, r, a.publicURL+"/?enrollment=collected", http.StatusSeeOther)
 }
+
+func deviceRecordPath(data, udid string) string {
+	hash := sha256.Sum256([]byte(udid))
+	return filepath.Join(data, "devices", hex.EncodeToString(hash[:])+".json")
+}
+
+func deviceHasRegisteredAppleTeam(d Device) bool {
+	for _, registration := range d.AppleRegistrations {
+		if registration.Status == "registered" {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) saveDeviceRecord(d Device) (bool, error) {
 	dir := filepath.Join(a.data, "devices")
 	if e := os.MkdirAll(dir, 0700); e != nil {
 		return false, e
 	}
-	hash := sha256.Sum256([]byte(d.UDID))
-	path := filepath.Join(dir, hex.EncodeToString(hash[:])+".json")
+	path := deviceRecordPath(a.data, d.UDID)
 	_, statErr := os.Stat(path)
 	created := os.IsNotExist(statErr)
+	if !created && statErr == nil {
+		if raw, readErr := os.ReadFile(path); readErr == nil {
+			var current Device
+			if json.Unmarshal(raw, &current) == nil {
+				if len(d.AppleRegistrations) == 0 && len(current.AppleRegistrations) > 0 {
+					d.AppleRegistrations = current.AppleRegistrations
+				}
+				if d.Source == "" {
+					d.Source = current.Source
+				}
+				if d.CollectedAt.IsZero() {
+					d.CollectedAt = current.CollectedAt
+				}
+			}
+		}
+	}
 	if d.Source == "" {
 		d.Source = "legacy"
+	}
+	if deviceHasRegisteredAppleTeam(d) {
+		d.Status = "apple_registered"
 	}
 	b, e := json.Marshal(d)
 	if e != nil {
@@ -124,6 +169,24 @@ func (a *App) saveDeviceRecord(d Device) (bool, error) {
 		e = os.Rename(path+".tmp", path)
 	}
 	return created, e
+}
+
+func (a *App) readDeviceRecord(udid string) (Device, error) {
+	var d Device
+	if !udidRE.MatchString(udid) {
+		return d, fmt.Errorf("设备 UDID 无效")
+	}
+	raw, e := os.ReadFile(deviceRecordPath(a.data, udid))
+	if e != nil {
+		return d, e
+	}
+	if e = json.Unmarshal(raw, &d); e != nil {
+		return d, fmt.Errorf("设备记录损坏")
+	}
+	if d.AppleRegistrations == nil {
+		d.AppleRegistrations = map[string]AppleDeviceRegistration{}
+	}
+	return d, nil
 }
 
 func (a *App) listDevices(w http.ResponseWriter, r *http.Request) {
