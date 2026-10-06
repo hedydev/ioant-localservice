@@ -40,8 +40,8 @@ function renderCompatibilityScripts(){
   (scripts.length?scripts.map(script=>
    '<article class="release">'+
     '<div class="release-top"><div><strong>'+escapeHTML(script.title)+'</strong><div class="meta">'+escapeHTML(script.path)+'</div></div>'+
-    '<button data-run-script="'+escapeHTML(script.path)+'" '+((!script.ready||source.blocker)?'disabled':'')+'>拉取并发布</button></div>'+
-    '<p class="meta">'+escapeHTML(script.reason||'已识别项目脚本与说明；实际产物以执行结果为准。')+'</p>'+
+    '<button data-run-script="'+escapeHTML(script.path)+'" '+(!script.ready?'disabled':'')+'>运行脚本</button></div>'+
+    '<p class="meta">'+escapeHTML(script.reason||'直接在当前本地 checkout 中运行；ILS 不会自动 pull、stash、reset、clean 或切换分支。')+'</p>'+
     (script.markdown?'<details><summary>查看打包说明</summary><div class="release-markdown">'+releaseMarkdown(script.markdown)+'</div></details>':'')+
    '</article>'
   ).join(''):'<p class="meta">项目中没有 release*.sh。新项目优先使用 ILS Release Profile。</p>')+
@@ -51,7 +51,7 @@ function renderCompatibilityScripts(){
 function populateSourceForm(source=null){
  const form=$('#source-form');
  form.reset();
- form.elements.branch.value=source?.branch||'main';
+ form.elements.branch.value=source?.current_branch||source?.branch||'main';
  form.elements.path.value=source?.path||'';
  form.querySelector('.form-error').textContent='';
  $('#source-dialog-status').textContent='';
@@ -61,18 +61,22 @@ function renderSourceSummary(source){
  const button=$('#configure-source');
  if(!source||source.configured===false){
   button.textContent='配置项目来源';
-  $('#source-info').innerHTML='<div class="persistent-config-empty"><strong>尚未关联本地 Git 项目</strong><span>配置一次项目目录和发布分支后，ILS 会在构建前检查并执行 fast-forward pull。</span></div>';
+  $('#source-info').innerHTML='<div class="persistent-config-empty"><strong>尚未关联本地 Git 项目</strong><span>关联本地目录后，ILS 直接构建当前 checkout；不会自动同步远程仓库。</span></div>';
   return;
  }
  button.textContent='修改项目来源';
- const ready=!source.blocker;
+ const branch=source.current_branch||'detached HEAD';
+ const head=(source.head||'').slice(0,12)||'—';
+ const status=source.dirty?'有本地改动 · 允许构建':'工作目录 clean · 允许构建';
+ const upstream=source.upstream||'未配置';
  $('#source-info').innerHTML='<div class="persistent-config-grid">'+
   '<span><small>项目目录</small><strong>'+escapeHTML(source.path||'—')+'</strong></span>'+
-  '<span><small>发布分支</small><strong>'+escapeHTML(source.branch||'—')+'</strong></span>'+
-  '<span><small>当前分支 / upstream</small><strong>'+escapeHTML((source.current_branch||'detached')+' → '+(source.upstream||'未配置'))+'</strong></span>'+
-  '<span><small>状态</small><strong class="'+(ready?'config-ok':'config-warning')+'">'+escapeHTML(source.blocker||'工作目录干净，可构建发布')+'</strong></span>'+
+  '<span><small>当前分支</small><strong>'+escapeHTML(branch)+'</strong></span>'+
+  '<span><small>HEAD / upstream</small><strong>'+escapeHTML(head+' · '+upstream)+'</strong></span>'+
+  '<span><small>状态</small><strong class="'+(source.dirty?'config-warning':'config-ok')+'">'+escapeHTML(status)+'</strong></span>'+
  '</div>'+
- (source.remote?'<div class="persistent-config-detail">'+escapeHTML(source.remote)+'</div>':'');
+ (source.remote?'<div class="persistent-config-detail">'+escapeHTML(source.remote)+'</div>':'')+
+ '<div class="persistent-config-detail">构建记录会保存当前 branch、HEAD、dirty、upstream 和 remote；本地与远程不一致不会阻止构建。</div>';
 }
 
 function resetSourceUI(){
@@ -128,7 +132,7 @@ export function initBuildSource(){
    });
    $('#source-dialog').close();
    await loadBuildSource();
-   notice('项目来源已保存，现在可以创建或运行 ILS Release Profile。');
+   notice('项目来源已保存。ILS 将构建当前本地 checkout。');
   }catch(error){
    event.target.querySelector('.form-error').textContent=error.message;
   }finally{
