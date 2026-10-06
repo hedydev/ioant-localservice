@@ -103,6 +103,9 @@ func TestSignProfileProducesEmbeddedCMSPayload(t *testing.T) {
 	if _, err := exec.LookPath("openssl"); err != nil {
 		t.Skip("openssl unavailable")
 	}
+	if err := exec.Command("openssl", "cms", "-help").Run(); err != nil {
+		t.Skip("local openssl does not support cms")
+	}
 	dir := t.TempDir()
 	cert := filepath.Join(dir, "cert.pem")
 	key := filepath.Join(dir, "key.pem")
