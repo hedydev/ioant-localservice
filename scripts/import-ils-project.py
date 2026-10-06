@@ -25,6 +25,7 @@ PROFILE_KEYS = {
     "variant",
     "lane",
     "result_contract",
+    "build_type",
     "testflight_url",
     "testflight_group_name",
     "testflight_group_type",
@@ -135,11 +136,12 @@ def main() -> int:
     prepared_profiles = [normalized_profile(profile, args.apple_team) for profile in profiles]
     print(f"Project: {project_name} ({project_id})")
     print(f"Source:  {project_dir}")
-    print(f"Branch:  {branch}")
+    print(f"Branch:  {branch} (reference only; ILS builds the current checkout)")
     for profile in prepared_profiles:
         team = profile.get("apple_team_id")
         suffix = f" · Team {team}" if team else ""
-        print(f"Profile: {profile.get('id')} · {profile.get('lane')}{suffix}")
+        build_type = profile.get("build_type", "native")
+        print(f"Profile: {profile.get('id')} · {profile.get('lane')} · {build_type}{suffix}")
 
     if args.dry_run:
         print("Dry run only; ILS was not changed.")
@@ -169,7 +171,7 @@ def main() -> int:
         f"/api/projects/{encoded_id}/build-source",
         {"path": str(project_dir), "branch": branch},
     )
-    print("Build source: configured")
+    print("Build source: configured (current checkout will be used)")
 
     for profile in prepared_profiles:
         api(args.ils_url, token, "POST", f"/api/projects/{encoded_id}/release-profiles", profile)
