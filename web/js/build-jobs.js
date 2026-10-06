@@ -8,7 +8,7 @@ function ensureBuildJobsStyles(){
  if(document.querySelector('link[data-build-jobs-style]'))return;
  const link=document.createElement('link');
  link.rel='stylesheet';
- link.href='/build-jobs.css?v=20261006';
+ link.href='/build-jobs.css?v=20261007';
  link.dataset.buildJobsStyle='1';
  document.head.appendChild(link);
 }
@@ -20,9 +20,8 @@ function logElement(jobID){
 function updateBuildLog(jobID,text){
  const element=logElement(jobID);
  if(!element)return;
- const firstOpen=!buildState.logLoaded;
- const wasFollowing=firstOpen||buildState.followLog;
  const previous=element.textContent||'';
+ const scrollTop=element.scrollTop;
  if(previous===text){
   buildState.logLoaded=true;
   return;
@@ -33,14 +32,9 @@ function updateBuildLog(jobID,text){
   element.textContent=text;
  }
  buildState.logLoaded=true;
- if(wasFollowing){
-  element.scrollTop=element.scrollHeight;
-  buildState.followLog=true;
-  buildState.logScrollTop=element.scrollTop;
- }else{
-  const maxScroll=Math.max(0,element.scrollHeight-element.clientHeight);
-  element.scrollTop=Math.min(buildState.logScrollTop,maxScroll);
- }
+ const maxScroll=Math.max(0,element.scrollHeight-element.clientHeight);
+ element.scrollTop=Math.min(scrollTop,maxScroll);
+ buildState.logScrollTop=element.scrollTop;
 }
 
 function chooseRunningLog(jobs){
@@ -49,13 +43,17 @@ function chooseRunningLog(jobs){
  const running=jobs.find(job=>job.status==='running'&&!buildState.collapsedLogs.has(job.id));
  if(!running)return;
  buildState.activeLog=running.id;
- buildState.followLog=true;
+ buildState.followLog=false;
  buildState.logLoaded=false;
  buildState.logScrollTop=0;
 }
 
 function laneFor(job){
  return job.lane||job.result?.lane||job.profile_id||'';
+}
+
+function buildTypeLabel(value){
+ return ({native:'Native',expo:'Expo / React Native','hybrid-web-native':'Hybrid Web-Native',tauri:'Tauri / Rust'})[value]||value||'自定义脚本';
 }
 
 function linkedReleases(job){
@@ -104,9 +102,9 @@ function stageLabel(job){
 function progressView(job){
  if(job.status!=='running')return '';
  if(Number.isFinite(job.progress)){
-  return '<div class="job-progress" data-job-progress="'+escapeHTML(job.id)+'"><div class="job-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span class="job-progress-fill"></span></div><span data-progress-label></span></div>';
+  return '<div class="job-progress determinate" data-job-progress="'+escapeHTML(job.id)+'"><div class="job-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span class="job-progress-fill"></span><span class="job-progress-shine"></span></div><span data-progress-label></span></div>';
  }
- return '<div class="job-progress indeterminate" data-job-progress="'+escapeHTML(job.id)+'"><div class="job-progress-track" role="progressbar" aria-label="'+escapeHTML(stageLabel(job))+'"><span class="job-progress-fill"></span></div><span data-progress-label>'+escapeHTML(stageLabel(job))+'</span></div>';
+ return '<div class="job-progress indeterminate" data-job-progress="'+escapeHTML(job.id)+'"><div class="job-progress-track" role="progressbar" aria-label="'+escapeHTML(stageLabel(job))+'"><span class="job-progress-fill"></span><span class="job-progress-shine"></span></div><span data-progress-label>'+escapeHTML(stageLabel(job))+'</span></div>';
 }
 
 function updateProgress(article,job){
@@ -130,11 +128,11 @@ function updateProgress(article,job){
  track.setAttribute('aria-valuenow',String(value));
  if(fill.dataset.progressValue===String(value))return;
  const previous=buildState.progressByJob.get(job.id);
- const from=Number.isFinite(previous)?Math.max(0,Math.min(100,previous)):value;
+ const from=Number.isFinite(previous)?Math.max(0,Math.min(100,previous)):0;
  fill.getAnimations().forEach(animation=>animation.cancel());
  fill.animate(
   [{transform:'scaleX('+(from/100)+')'},{transform:'scaleX('+(value/100)+')'}],
-  {duration:from===value?0:850,easing:'cubic-bezier(.22,.61,.36,1)',fill:'forwards'}
+  {duration:from===value?0:1400,easing:'cubic-bezier(.16,1,.3,1)',fill:'forwards'}
  );
  fill.dataset.progressValue=String(value);
  buildState.progressByJob.set(job.id,value);
@@ -165,15 +163,16 @@ function resultView(job){
 function pipelineView(job){
  const lane=laneFor(job);
  const labels={
-  pull:'拉取',preflight:'预检查',build:'构建',archive:'归档',validate:'验证',
+  preflight:'预检查',build:'构建',archive:'归档',validate:'验证',
   export:'导出',package:'打包',notarize:'公证',upload:'上传',publish:'发布',complete:'完成'
  };
  if(lane==='ios-testflight'){
-  const stages=['pull','preflight','archive','validate','upload'];
+  const stages=['preflight','archive','validate','upload'];
   const terminalStages=['submitted','processing','available','complete'];
   let current=stages.indexOf(job.stage);
+  if(current<0&&job.status==='running')current=0;
   if(job.status==='succeeded'||terminalStages.includes(job.stage))current=stages.length;
-  const pipeline='<div class="pipeline" aria-label="构建流水线">'+stages.map((stage,index)=>{
+  const pipeline='<div class="pipeline pipeline-flow" aria-label="构建流水线">'+stages.map((stage,index)=>{
    let stepState='pending';
    if(index<current)stepState='done';
    else if(index===current){
@@ -181,20 +180,22 @@ function pipelineView(job){
     else if(job.status==='running')stepState='active';
     else stepState='done';
    }
-   return '<span class="pipeline-step '+stepState+'">'+escapeHTML(labels[stage]||stage)+'</span>';
+   return '<span class="pipeline-step '+stepState+'"><i aria-hidden="true"></i>'+escapeHTML(labels[stage]||stage)+'</span>';
   }).join('<span class="pipeline-arrow">→</span>')+'</div>';
   const release=linkedRelease(job);
   const presentation=release||(job.status==='succeeded'?{delivery:'testflight',status:'submitted',testflight:{}}:null);
   return pipeline+(presentation?testFlightLifecycleView(presentation,{compact:true}):'');
  }
  const lanes={
-  'ios-adhoc':['pull','preflight','archive','validate','export','publish','complete'],
-  'macos-test':['pull','preflight','build','package','validate','publish','complete'],
-  'macos-release':['pull','preflight','build','package','notarize','validate','publish','complete']
+  'ios-adhoc':['preflight','archive','validate','export','publish','complete'],
+  'macos-test':['preflight','build','package','validate','publish','complete'],
+  'macos-release':['preflight','build','package','notarize','validate','publish','complete']
  };
- const stages=lanes[lane]||['pull','build','validate','publish','complete'];
- const current=stages.indexOf(job.stage);
- return '<div class="pipeline" aria-label="构建流水线">'+stages.map((stage,index)=>{
+ const stages=lanes[lane]||['preflight','build','validate','publish','complete'];
+ let current=stages.indexOf(job.stage);
+ if(current<0&&job.status==='running')current=0;
+ if(job.status==='succeeded')current=stages.length;
+ return '<div class="pipeline pipeline-flow" aria-label="构建流水线">'+stages.map((stage,index)=>{
   let stepState='pending';
   if(index<current)stepState='done';
   else if(index===current){
@@ -202,15 +203,24 @@ function pipelineView(job){
    else if(job.status==='running')stepState='active';
    else stepState='done';
   }
-  return '<span class="pipeline-step '+stepState+'">'+escapeHTML(labels[stage]||stage)+'</span>';
+  return '<span class="pipeline-step '+stepState+'"><i aria-hidden="true"></i>'+escapeHTML(labels[stage]||stage)+'</span>';
  }).join('<span class="pipeline-arrow">→</span>')+'</div>';
+}
+
+function sourceMeta(job){
+ const branch=job.branch||'detached';
+ const head=(job.commit||job.head||'').slice(0,12)||'unknown';
+ const dirty=job.dirty?' · 本地改动':' · clean';
+ const upstream=job.upstream?' · upstream '+job.upstream:'';
+ return escapeHTML(branch)+' · HEAD '+escapeHTML(head)+dirty+escapeHTML(upstream);
 }
 
 function jobMainHTML(job){
  const releases=job.release_ids||[];
  return '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
   '<div class="build-title-row">'+buildAppIcon(job,{className:'job-app-icon',title:job.title||'App Icon'})+'<strong>'+platformIcons(targetsForJob(job))+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+'</strong> <span class="badge">'+escapeHTML(stageLabel(job))+'</span></div>'+
-  '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · commit '+escapeHTML((job.commit||'').slice(0,12))+'</div>'+
+  '<div class="meta">'+escapeHTML(job.mode==='profile'?'ILS Profile':'Project Script')+' · '+escapeHTML(buildTypeLabel(job.build_type))+'</div>'+
+  '<div class="meta git-build-meta">'+sourceMeta(job)+'</div>'+
   pipelineView(job)+
   (job.message?'<div class="job-message">'+escapeHTML(job.message)+'</div>':'')+
   progressView(job)+
@@ -230,7 +240,7 @@ function ensureLogPanel(article,job,expanded){
  const panel=document.createElement('div');
  panel.className='build-log-panel';
  panel.dataset.logFor=job.id;
- panel.innerHTML='<div class="build-log-heading"><strong>'+(job.status==='running'?'实时日志':'任务日志')+'</strong><span class="meta">'+(job.status==='running'?'仅显示此构建任务的实时输出':'仅显示此构建任务已保存的输出')+'</span></div><pre class="build-log-output" id="build-log-'+escapeHTML(job.id)+'" data-build-log-output="'+escapeHTML(job.id)+'" aria-label="'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+' 构建日志"></pre>';
+ panel.innerHTML='<div class="build-log-heading"><strong>'+(job.status==='running'?'实时日志':'任务日志')+'</strong><span class="meta">新内容只追加，不自动滚动</span></div><pre class="build-log-output" id="build-log-'+escapeHTML(job.id)+'" data-build-log-output="'+escapeHTML(job.id)+'" aria-label="'+escapeHTML(job.title||job.profile_id||job.script||'ILS Build')+' 构建日志"></pre>';
  article.appendChild(panel);
 }
 
@@ -262,7 +272,7 @@ function renderJobs(jobs){
    article.innerHTML='<div class="build-job-main"></div><div class="build-job-actions"><button type="button"></button></div>';
   }
   const expanded=buildState.activeLog===job.id;
-  article.className='build-job'+(expanded?' log-expanded':'');
+  article.className='build-job'+(expanded?' log-expanded':'')+(job.status==='running'?' build-running':'');
   const main=article.querySelector('.build-job-main');
   const html=jobMainHTML(job);
   if(main._ilsHTML!==html){
@@ -308,18 +318,12 @@ export async function loadBuildJobs(){
 function resetJobs(){
  buildState.activeLog=null;
  buildState.collapsedLogs.clear();
- buildState.followLog=true;
+ buildState.followLog=false;
  buildState.logLoaded=false;
  buildState.logScrollTop=0;
  buildState.jobsLoading=false;
  buildState.progressByJob.clear();
  $('#build-jobs').innerHTML='';
-}
-
-function logFromEvent(event){
- const target=event.target;
- if(!(target instanceof Element))return null;
- return target.closest('[data-build-log-output]');
 }
 
 export function initBuildJobs(){
@@ -336,35 +340,20 @@ export function initBuildJobs(){
    buildState.activeLog=jobID;
    buildState.collapsedLogs.delete(jobID);
   }
-  buildState.followLog=true;
+  buildState.followLog=false;
   buildState.logLoaded=false;
   buildState.logScrollTop=0;
   loadBuildJobs();
  };
- container.addEventListener('scroll',event=>{
-  const element=logFromEvent(event);
-  if(!element)return;
-  buildState.followLog=(element.scrollHeight-element.scrollTop-element.clientHeight)<64;
-  buildState.logScrollTop=element.scrollTop;
- },true);
- const pauseFollowing=event=>{
-  const element=logFromEvent(event);
-  if(!element)return;
-  buildState.followLog=false;
-  buildState.logScrollTop=element.scrollTop;
- };
- container.addEventListener('wheel',pauseFollowing,{capture:true,passive:true});
- container.addEventListener('touchmove',pauseFollowing,{capture:true,passive:true});
- container.addEventListener('pointerdown',pauseFollowing,true);
  window.addEventListener('build-started',event=>{
   const jobID=event.detail.job.id;
   buildState.activeLog=jobID;
   buildState.collapsedLogs.delete(jobID);
-  buildState.followLog=true;
+  buildState.followLog=false;
   buildState.logLoaded=false;
   buildState.logScrollTop=0;
   loadBuildJobs();
- });
+ };
  window.addEventListener('project-changed',resetJobs);
  window.addEventListener('admin-cleared',resetJobs);
  window.addEventListener('admin-loaded',()=>{
