@@ -31,7 +31,7 @@ export async function api(path,options={}){
  const response=await fetch(path,{...options,headers:{...(state.admin?{Authorization:'Bearer '+state.token}:{}),...options.headers}});
  const data=await response.json();
  if(epoch!==state.authEpoch)throw new Error('管理会话已更改，请重新操作');
- if(response.status===401&&state.admin)setAdmin(false);
+ if((response.status===401||response.status===403)&&state.admin)setAdmin(false);
  if(!response.ok)throw new Error(data.error||'请求失败');
  return data;
 }
@@ -107,11 +107,21 @@ export async function restoreAdminSession(){
  button.textContent='恢复管理状态…';
  try{
   const response=await fetch('/api/admin/session',{headers:{Authorization:'Bearer '+token}});
-  const result=await response.json();
-  if(!response.ok||result.authenticated!==true)throw new Error(result.error||'管理员验证已失效');
+  let result={};
+  try{result=await response.json();}catch{}
+  if(response.status===401||response.status===403){
+   setAdmin(false);
+   return;
+  }
+  if(!response.ok)throw new Error(result.error||'ILS 暂时不可用');
+  if(result.authenticated!==true){
+   setAdmin(false);
+   return;
+  }
   setAdmin(true,token);
- }catch{
-  setAdmin(false);
+ }catch(error){
+  // A stopped/restarting ILS must not erase the browser's remembered token.
+  console.warn('ILS admin session restore deferred:',error);
  }finally{
   button.disabled=false;
   if(!state.admin)button.textContent='管理员验证';
