@@ -10,6 +10,16 @@ function buildTypeLabel(value){
  return ({native:'Native',expo:'Expo / React Native','hybrid-web-native':'Hybrid Web-Native',tauri:'Tauri / Rust'})[value]||value||'Native';
 }
 
+function ensureBuildTypeField(){
+ const form=$('#profile-form');
+ if(form.elements.build_type)return;
+ const grid=form.querySelector('.form-grid');
+ const label=document.createElement('label');
+ label.innerHTML='构建类型<select name="build_type"><option value="native">Native</option><option value="expo">Expo / React Native</option><option value="hybrid-web-native">Hybrid Web-Native</option><option value="tauri">Tauri / Rust</option></select><span class="meta">仅用于描述构建方式；ILS 始终只调用下面一个标准脚本入口。</span>';
+ const before=form.elements.result_contract?.closest('label')||null;
+ grid.insertBefore(label,before);
+}
+
 function teamLabel(team){
  const identity=team.identities?.[0]||'';
  const short=identity.replace(/\s*\([A-Z0-9]{10}\)\s*$/,'');
@@ -170,6 +180,7 @@ function openProfile(profile=null){
   notice('请先关联本地项目目录');
   return;
  }
+ ensureBuildTypeField();
  const form=$('#profile-form');
  form.reset();
  form.elements.id.readOnly=Boolean(profile);
@@ -204,6 +215,7 @@ function resetProfiles(){
 }
 
 export function initBuildProfiles(){
+ ensureBuildTypeField();
  $('#new-release-profile').onclick=()=>openProfile();
  $('#profile-form [name=platform]').onchange=syncProfileForm;
  $('#profile-form [name=lane]').onchange=syncProfileForm;
