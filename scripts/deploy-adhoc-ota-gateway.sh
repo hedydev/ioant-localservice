@@ -48,7 +48,8 @@ Environment aliases:
   ILS_OTA_DATA_DIR
 
 This script also deploys the private ota-gateway systemd service, creates
-the shared sync token, and writes <ILS_DATA>/ota-gateway.json for local ILS.
+the shared sync token, writes <ILS_DATA>/ota-gateway.json for local ILS,
+and signs enrollment profiles with the public Let's Encrypt identity.
 USAGE
 }
 
@@ -193,6 +194,9 @@ SITE_AVAILABLE="/etc/nginx/sites-available/${SITE_NAME}.conf"
 SITE_ENABLED="/etc/nginx/sites-enabled/${SITE_NAME}.conf"
 TMP_SITE="/tmp/${SITE_NAME}.conf.$$"
 BACKUP=""
+SIGNING_CERT="/etc/ils-ota-gateway/profile-signing-cert.pem"
+SIGNING_KEY="/etc/ils-ota-gateway/profile-signing-key.pem"
+SIGNING_CHAIN="/etc/ils-ota-gateway/profile-signing-chain.pem"
 
 command -v nginx >/dev/null 2>&1 || {
   echo "ERROR: nginx is not installed on the EC2 host" >&2
@@ -223,7 +227,7 @@ Wants=network-online.target
 Type=simple
 User=${OWNER}
 Group=${OWNER}
-ExecStart=/usr/local/bin/ils-ota-gateway --listen 127.0.0.1:8790 --public-url https://${DOMAIN} --data /var/lib/ils-ota-gateway --sync-token-file /etc/ils-ota-gateway/sync-token
+ExecStart=/usr/local/bin/ils-ota-gateway --listen 127.0.0.1:8790 --public-url https://${DOMAIN} --data /var/lib/ils-ota-gateway --sync-token-file /etc/ils-ota-gateway/sync-token --profile-signing-cert ${SIGNING_CERT} --profile-signing-key ${SIGNING_KEY} --profile-signing-chain ${SIGNING_CHAIN}
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
@@ -373,8 +377,32 @@ sudo certbot install \
   --non-interactive \
   --cert-name "$DOMAIN"
 
+CERT_LINEAGE="/etc/letsencrypt/live/${DOMAIN}"
+sudo test -s "$CERT_LINEAGE/cert.pem"
+sudo test -s "$CERT_LINEAGE/privkey.pem"
+sudo test -s "$CERT_LINEAGE/chain.pem"
+sudo install -o root -g "$OWNER" -m 0640 "$CERT_LINEAGE/cert.pem" "$SIGNING_CERT"
+sudo install -o root -g "$OWNER" -m 0640 "$CERT_LINEAGE/privkey.pem" "$SIGNING_KEY"
+sudo install -o root -g "$OWNER" -m 0640 "$CERT_LINEAGE/chain.pem" "$SIGNING_CHAIN"
+
+# Keep the CMS signing identity in sync with future Let's Encrypt renewals.
+cat > /tmp/ils-ota-profile-signing-renew.$$ <<HOOK
+#!/usr/bin/env bash
+set -euo pipefail
+CERT_LINEAGE="/etc/letsencrypt/live/${DOMAIN}"
+install -o root -g "${OWNER}" -m 0640 "\$CERT_LINEAGE/cert.pem" "${SIGNING_CERT}"
+install -o root -g "${OWNER}" -m 0640 "\$CERT_LINEAGE/privkey.pem" "${SIGNING_KEY}"
+install -o root -g "${OWNER}" -m 0640 "\$CERT_LINEAGE/chain.pem" "${SIGNING_CHAIN}"
+systemctl try-restart ils-ota-gateway.service
+HOOK
+sudo install -d -o root -g root -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+sudo install -o root -g root -m 0755 /tmp/ils-ota-profile-signing-renew.$$ /etc/letsencrypt/renewal-hooks/deploy/ils-ota-gateway-profile-signing
+rm -f /tmp/ils-ota-profile-signing-renew.$$
+
 sudo nginx -t
 sudo systemctl reload nginx
+sudo systemctl daemon-reload
+sudo systemctl restart ils-ota-gateway
 sudo systemctl enable --now certbot.timer >/dev/null 2>&1 || true
 
 sudo systemctl is-active --quiet ils-ota-gateway
@@ -418,9 +446,13 @@ NEXT
   exit 0
 fi
 
-curl --fail --silent --show-error --max-time 15 "https://${DOMAIN}/_ils/health" >/dev/null
+HEALTH_JSON="$(curl --fail --silent --show-error --max-time 15 "https://${DOMAIN}/_ils/health")"
+printf '%s' "$HEALTH_JSON" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("ok") is True, data; assert data.get("profile_signed") is True, data'
 curl --fail --silent --show-error --max-time 15 "https://${DOMAIN}/" >/dev/null
 curl --fail --silent --show-error --max-time 15 "https://${DOMAIN}/enroll" >/dev/null
+SIGNED_PROFILE="$TMP_DIR/enroll.mobileconfig"
+curl --fail --silent --show-error --max-time 15 "https://${DOMAIN}/enroll.mobileconfig" -o "$SIGNED_PROFILE"
+openssl cms -verify -inform DER -noverify -in "$SIGNED_PROFILE" -out /dev/null >/dev/null 2>&1 || fail "enrollment mobileconfig is not a valid CMS signed profile"
 TOKEN="$(cat "$SYNC_TOKEN_FILE")"
 curl --fail --silent --show-error --max-time 15 \
   -H "Authorization: Bearer $TOKEN" \
@@ -429,5 +461,6 @@ printf '\nOTA Gateway verification succeeded:\n'
 printf '  https://%s/_ils/health\n' "$DOMAIN"
 printf '  https://%s/\n' "$DOMAIN"
 printf '  https://%s/enroll\n' "$DOMAIN"
+printf '  enrollment profile: CMS signed\n'
 printf 'Local ILS config: %s\n' "$GATEWAY_CONFIG"
 printf 'Static OTA root on EC2: %s\n' "$REMOTE_ROOT"
