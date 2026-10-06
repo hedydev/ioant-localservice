@@ -7,7 +7,8 @@ export const buildState={
  jobsLoading:false,
  followLog:true,
  logLoaded:false,
- logScrollTop:0
+ logScrollTop:0,
+ progressByJob:new Map()
 };
 
 export function resetBuildState(){
@@ -19,4 +20,5 @@ export function resetBuildState(){
  buildState.followLog=true;
  buildState.logLoaded=false;
  buildState.logScrollTop=0;
+ buildState.progressByJob.clear();
 }
