@@ -4,6 +4,15 @@ import {buildState} from './build-state.js';
 import {platformIcons,targetsForJob,buildAppIcon} from './platform-ui.js';
 import {releaseStatusLabel,testFlightLifecycleView,testFlightLinkSource} from './release-ui.js';
 
+function ensureBuildJobsStyles(){
+ if(document.querySelector('link[data-build-jobs-style]'))return;
+ const link=document.createElement('link');
+ link.rel='stylesheet';
+ link.href='/build-jobs.css?v=20261006';
+ link.dataset.buildJobsStyle='1';
+ document.head.appendChild(link);
+}
+
 function logElement(jobID){
  return document.getElementById('build-log-'+jobID);
 }
@@ -95,10 +104,40 @@ function stageLabel(job){
 function progressView(job){
  if(job.status!=='running')return '';
  if(Number.isFinite(job.progress)){
-  const value=Math.max(0,Math.min(100,job.progress));
-  return '<div class="job-progress"><progress max="100" value="'+value+'"></progress><span>'+value+'%</span></div>';
+  return '<div class="job-progress" data-job-progress="'+escapeHTML(job.id)+'"><div class="job-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span class="job-progress-fill"></span></div><span data-progress-label></span></div>';
  }
- return '<div class="job-progress indeterminate"><progress max="100" aria-label="'+escapeHTML(stageLabel(job))+'"></progress><span>'+escapeHTML(stageLabel(job))+'</span></div>';
+ return '<div class="job-progress indeterminate" data-job-progress="'+escapeHTML(job.id)+'"><div class="job-progress-track" role="progressbar" aria-label="'+escapeHTML(stageLabel(job))+'"><span class="job-progress-fill"></span></div><span data-progress-label>'+escapeHTML(stageLabel(job))+'</span></div>';
+}
+
+function updateProgress(article,job){
+ const root=article.querySelector('[data-job-progress]');
+ if(!root){
+  buildState.progressByJob.delete(job.id);
+  return;
+ }
+ const fill=root.querySelector('.job-progress-fill');
+ const label=root.querySelector('[data-progress-label]');
+ const track=root.querySelector('.job-progress-track');
+ if(!fill||!label||!track)return;
+ if(!Number.isFinite(job.progress)){
+  label.textContent=stageLabel(job);
+  track.removeAttribute('aria-valuenow');
+  buildState.progressByJob.delete(job.id);
+  return;
+ }
+ const value=Math.max(0,Math.min(100,job.progress));
+ label.textContent=value+'%';
+ track.setAttribute('aria-valuenow',String(value));
+ if(fill.dataset.progressValue===String(value))return;
+ const previous=buildState.progressByJob.get(job.id);
+ const from=Number.isFinite(previous)?Math.max(0,Math.min(100,previous)):value;
+ fill.getAnimations().forEach(animation=>animation.cancel());
+ fill.animate(
+  [{transform:'scaleX('+(from/100)+')'},{transform:'scaleX('+(value/100)+')'}],
+  {duration:from===value?0:850,easing:'cubic-bezier(.22,.61,.36,1)',fill:'forwards'}
+ );
+ fill.dataset.progressValue=String(value);
+ buildState.progressByJob.set(job.id,value);
 }
 
 function resultView(job){
@@ -129,7 +168,6 @@ function pipelineView(job){
   pull:'拉取',preflight:'预检查',build:'构建',archive:'归档',validate:'验证',
   export:'导出',package:'打包',notarize:'公证',upload:'上传',publish:'发布',complete:'完成'
  };
-
  if(lane==='ios-testflight'){
   const stages=['pull','preflight','archive','validate','upload'];
   const terminalStages=['submitted','processing','available','complete'];
@@ -146,12 +184,9 @@ function pipelineView(job){
    return '<span class="pipeline-step '+stepState+'">'+escapeHTML(labels[stage]||stage)+'</span>';
   }).join('<span class="pipeline-arrow">→</span>')+'</div>';
   const release=linkedRelease(job);
-  const presentation=release||(job.status==='succeeded'
-   ?{delivery:'testflight',status:'submitted',testflight:{}}
-   :null);
+  const presentation=release||(job.status==='succeeded'?{delivery:'testflight',status:'submitted',testflight:{}}:null);
   return pipeline+(presentation?testFlightLifecycleView(presentation,{compact:true}):'');
  }
-
  const lanes={
   'ios-adhoc':['pull','preflight','archive','validate','export','publish','complete'],
   'macos-test':['pull','preflight','build','package','validate','publish','complete'],
@@ -170,6 +205,7 @@ function pipelineView(job){
   return '<span class="pipeline-step '+stepState+'">'+escapeHTML(labels[stage]||stage)+'</span>';
  }).join('<span class="pipeline-arrow">→</span>')+'</div>';
 }
+
 function jobMainHTML(job){
  const releases=job.release_ids||[];
  return '<div class="build-time">'+escapeHTML(formatDate(job.created_at))+'</div>'+
@@ -201,28 +237,30 @@ function ensureLogPanel(article,job,expanded){
 function renderJobs(jobs){
  jobs=[...jobs].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
  const container=$('#build-jobs');
+ const pageX=window.scrollX;
+ const pageY=window.scrollY;
  if(!jobs.length){
   buildState.activeLog=null;
+  buildState.progressByJob.clear();
   container.innerHTML='<div class="empty"><strong>还没有构建任务</strong>运行 Release Profile 后，任务状态会显示在这里。</div>';
   return;
  }
-
  chooseRunningLog(jobs);
-
  const keep=new Set(jobs.map(job=>job.id));
  container.querySelectorAll('[data-build-job-id]').forEach(article=>{
-  if(!keep.has(article.dataset.buildJobId))article.remove();
+  if(!keep.has(article.dataset.buildJobId)){
+   buildState.progressByJob.delete(article.dataset.buildJobId);
+   article.remove();
+  }
  });
  container.querySelector('.empty')?.remove();
-
- jobs.forEach(job=>{
+ jobs.forEach((job,index)=>{
   let article=container.querySelector('[data-build-job-id="'+CSS.escape(job.id)+'"]');
   if(!article){
    article=document.createElement('article');
    article.dataset.buildJobId=job.id;
    article.innerHTML='<div class="build-job-main"></div><div class="build-job-actions"><button type="button"></button></div>';
   }
-
   const expanded=buildState.activeLog===job.id;
   article.className='build-job'+(expanded?' log-expanded':'');
   const main=article.querySelector('.build-job-main');
@@ -231,17 +269,19 @@ function renderJobs(jobs){
    main.innerHTML=html;
    main._ilsHTML=html;
   }
-
+  updateProgress(article,job);
   const button=article.querySelector('.build-job-actions button');
   button.dataset.buildLog=job.id;
   button.setAttribute('aria-expanded',String(expanded));
   button.setAttribute('aria-controls','build-log-'+job.id);
   button.textContent=expanded?'收起日志':'查看日志';
-
   ensureLogPanel(article,job,expanded);
-  container.appendChild(article);
+  const currentAtIndex=container.children[index]||null;
+  if(currentAtIndex!==article)container.insertBefore(article,currentAtIndex);
  });
+ if(window.scrollX!==pageX||window.scrollY!==pageY)window.scrollTo(pageX,pageY);
 }
+
 export async function loadBuildJobs(){
  if(!state.project||!state.admin||buildState.jobsLoading)return;
  buildState.jobsLoading=true;
@@ -256,7 +296,10 @@ export async function loadBuildJobs(){
    updateBuildLog(buildState.activeLog,data.log);
   }
  }catch(error){
-  if(project===state.project)$('#build-jobs').innerHTML='<p class="form-error">'+escapeHTML(error.message)+'</p>';
+  if(project!==state.project)return;
+  const container=$('#build-jobs');
+  if(!container.querySelector('[data-build-job-id]'))container.innerHTML='<p class="form-error">'+escapeHTML(error.message)+'</p>';
+  else console.warn('ILS build polling failed:',error);
  }finally{
   buildState.jobsLoading=false;
  }
@@ -269,11 +312,20 @@ function resetJobs(){
  buildState.logLoaded=false;
  buildState.logScrollTop=0;
  buildState.jobsLoading=false;
+ buildState.progressByJob.clear();
  $('#build-jobs').innerHTML='';
 }
 
+function logFromEvent(event){
+ const target=event.target;
+ if(!(target instanceof Element))return null;
+ return target.closest('[data-build-log-output]');
+}
+
 export function initBuildJobs(){
- $('#build-jobs').onclick=event=>{
+ ensureBuildJobsStyles();
+ const container=$('#build-jobs');
+ container.onclick=event=>{
   const button=event.target.closest('[data-build-log]');
   if(!button)return;
   const jobID=button.dataset.buildLog;
@@ -289,14 +341,21 @@ export function initBuildJobs(){
   buildState.logScrollTop=0;
   loadBuildJobs();
  };
-
- $('#build-jobs').addEventListener('scroll',event=>{
-  const element=event.target.closest('[data-build-log-output]');
+ container.addEventListener('scroll',event=>{
+  const element=logFromEvent(event);
   if(!element)return;
   buildState.followLog=(element.scrollHeight-element.scrollTop-element.clientHeight)<64;
   buildState.logScrollTop=element.scrollTop;
  },true);
-
+ const pauseFollowing=event=>{
+  const element=logFromEvent(event);
+  if(!element)return;
+  buildState.followLog=false;
+  buildState.logScrollTop=element.scrollTop;
+ };
+ container.addEventListener('wheel',pauseFollowing,{capture:true,passive:true});
+ container.addEventListener('touchmove',pauseFollowing,{capture:true,passive:true});
+ container.addEventListener('pointerdown',pauseFollowing,true);
  window.addEventListener('build-started',event=>{
   const jobID=event.detail.job.id;
   buildState.activeLog=jobID;
@@ -314,7 +373,6 @@ export function initBuildJobs(){
  window.addEventListener('view-changed',event=>{
   if(event.detail.view==='builds'&&state.admin)loadBuildJobs();
  });
-
  setInterval(()=>{
   if(document.hidden||!state.admin||state.view!=='builds')return;
   loadBuildJobs();
