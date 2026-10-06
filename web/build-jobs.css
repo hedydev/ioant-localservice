@@ -141,7 +141,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .job-progress-indeterminate .job-progress-fill,
+  .job-progress.indeterminate .job-progress-fill,
   .job-progress-shine,
   .pipeline-flow .pipeline-step.active i,
   .build-job.build-running::before {
