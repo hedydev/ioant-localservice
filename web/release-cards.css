@@ -1,0 +1,47 @@
+.testflight-state-wrap.compact {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.testflight-state-wrap.compact .testflight-state-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  gap: 6px;
+}
+
+.testflight-state-wrap.compact .testflight-state-item {
+  min-width: 0;
+  padding: 6px 7px;
+}
+
+.testflight-state-wrap.compact .testflight-state-item small,
+.testflight-state-wrap.compact .testflight-state-item strong {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.18;
+}
+
+.testflight-state-wrap.compact .release-last-sync {
+  align-self: flex-end;
+  margin-left: 0;
+}
+
+.release-link-source,
+.release-card.featured .release-link-source {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  color: inherit;
+  opacity: .72;
+  font-size: .72rem;
+}
+
+@media (max-width: 560px) {
+  .testflight-state-wrap.compact .testflight-state-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
