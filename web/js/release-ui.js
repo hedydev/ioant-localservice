@@ -133,9 +133,9 @@ export function releaseInstallNote(release){
 
 export function testFlightLinkSource(release){
  if(release?.delivery!=='testflight'||!release.open_url)return '';
- if(release.testflight?.public_link&&release.testflight.public_link===release.open_url)return 'Apple Public Link';
- if(release.testflight?.fallback_url&&release.testflight.fallback_url===release.open_url)return 'Profile fallback';
- return 'TestFlight link';
+ if(release.testflight?.public_link&&release.testflight.public_link===release.open_url)return '链接来源：Apple Public Link';
+ if(release.testflight?.fallback_url&&release.testflight.fallback_url===release.open_url)return '链接来源：Profile fallback';
+ return '链接来源：TestFlight link';
 }
 
 export function testFlightLifecycleView(release,{compact=false}={}){
@@ -245,7 +245,7 @@ export function renderReleaseCard(release,{featured=false,showDetails=false}={})
    '<span class="release-status status-'+escapeHTML(tone)+'">'+escapeHTML(status)+'</span>'+
   '</div>'+
   '<p class="release-notes">'+escapeHTML(release.notes||'暂无更新说明')+'</p>'+
-  testFlightLifecycleView(release)+
+  testFlightLifecycleView(release,{compact:featured})+
   (release.delivery==='testflight'?'<p class="release-status-message">'+escapeHTML(release.status_message||releaseInstallNote(release))+'</p>':'')+
   releaseActionsView(release)+
   (showDetails?releaseDetailsView(release):'')+
