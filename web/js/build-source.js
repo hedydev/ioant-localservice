@@ -108,6 +108,16 @@ export async function loadBuildSource(){
 }
 
 export function initBuildSource(){
+ const form=$('#source-form');
+ const dialogHelp=$('#source-dialog > form > p');
+ if(dialogHelp)dialogHelp.textContent='这里只关联本地 Git 项目目录。ILS 构建点击时实际存在的 checkout：任意分支、dirty 或本地/远程不一致都允许；不会 pull、切分支、stash、reset 或 clean。';
+ const branchLabel=form.elements.branch?.closest('label');
+ if(branchLabel){
+  const textNode=[...branchLabel.childNodes].find(node=>node.nodeType===Node.TEXT_NODE);
+  if(textNode)textNode.nodeValue='参考分支 ';
+  if(!branchLabel.querySelector('.meta'))branchLabel.insertAdjacentHTML('beforeend','<span class="meta">仅作为项目元数据/导入默认值，不限制实际构建分支。</span>');
+ }
+
  $('#scan-builds').onclick=()=>{
   if(needAdmin())loadBuildSource();
  };
@@ -119,7 +129,7 @@ export function initBuildSource(){
   $('#source-dialog').showModal();
  };
 
- $('#source-form').onsubmit=async event=>{
+ form.onsubmit=async event=>{
   event.preventDefault();
   if(!needAdmin()||!state.project)return;
   const button=event.target.querySelector('[type=submit]');
@@ -154,9 +164,9 @@ export function initBuildSource(){
     $('#source-dialog-status').textContent='已取消选择，原路径未更改。';
     return;
    }
-   $('#source-form [name=path]').value=result.path;
+   form.elements.path.value=result.path;
    $('#source-dialog-status').textContent='已选择：'+result.path;
-   $('#source-form [type=submit]').focus();
+   form.querySelector('[type=submit]').focus();
   }catch(error){
    if(state.project===project)$('#source-dialog-status').textContent=error.message;
   }finally{
