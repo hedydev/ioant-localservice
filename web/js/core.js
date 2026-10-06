@@ -129,6 +129,8 @@ export async function restoreAdminSession(){
 }
 
 export function initCore(){
+ const adminHelp=$('#admin-dialog p');
+ if(adminHelp)adminHelp.textContent='输入这台 Mac 的发布密钥。验证成功后会保存在此浏览器，刷新或重新打开无需再次输入；只有退出管理或服务明确拒绝该密钥时才清除。';
  $('#admin-button').onclick=()=>$('#admin-dialog').showModal();
 
  let adminAttempt=0;
