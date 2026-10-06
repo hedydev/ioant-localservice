@@ -207,11 +207,17 @@ func (a *App) refreshProjectIcons(project, root string) {
 
 func (a *App) snapshotReleaseIcon(release Release, artifact string) {
 	var raw []byte
-	if release.Platform == "ios" {
+	if release.Platform == "ios" && artifact != "" {
 		raw, _ = extractIPAAppIcon(artifact)
 	}
 	if len(raw) == 0 {
 		raw, _ = os.ReadFile(a.projectIconPath(release.ProjectID, release.Platform))
+	}
+	if len(raw) == 0 {
+		if source, e := a.readSource(release.ProjectID); e == nil {
+			a.refreshProjectIcons(release.ProjectID, source.Path)
+			raw, _ = os.ReadFile(a.projectIconPath(release.ProjectID, release.Platform))
+		}
 	}
 	if pngBytes(raw) {
 		_ = writeBinaryAtomic(a.releaseIconPath(release.ID), raw)
