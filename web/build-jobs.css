@@ -3,36 +3,64 @@
   overflow-anchor: none;
 }
 
+.build-job.build-running {
+  position: relative;
+}
+
+.build-job.build-running::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, transparent, #27465f 28%, #27465f 72%, transparent);
+  background-size: 100% 220%;
+  animation: ils-build-running-edge 2.4s linear infinite;
+  pointer-events: none;
+}
+
 .job-progress {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 8px 0;
+  margin: 10px 0;
 }
 
 .job-progress-track {
   position: relative;
-  flex: 0 1 360px;
-  width: min(360px, 100%);
+  flex: 0 1 420px;
+  width: min(420px, 100%);
   height: 10px;
   overflow: hidden;
   border-radius: 999px;
   background: #e6ebef;
+  box-shadow: inset 0 0 0 1px rgba(39,70,95,.06);
 }
 
-.job-progress-fill {
+.job-progress-fill,
+.job-progress-shine {
+  position: absolute;
+  inset: 0;
   display: block;
-  width: 100%;
-  height: 100%;
   border-radius: inherit;
-  background: #27465f;
-  transform: scaleX(0);
   transform-origin: left center;
   will-change: transform;
 }
 
+.job-progress-fill {
+  background: linear-gradient(90deg, #27465f, #3f6986);
+  transform: scaleX(0);
+}
+
+.job-progress-shine {
+  width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.72), transparent);
+  animation: ils-build-shine 1.7s ease-in-out infinite;
+  pointer-events: none;
+}
+
 .job-progress > span {
-  min-width: 42px;
+  min-width: 78px;
   font-size: .75rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -40,22 +68,83 @@
 }
 
 .job-progress.indeterminate .job-progress-track {
-  flex-basis: 240px;
+  flex-basis: 320px;
 }
 
 .job-progress.indeterminate .job-progress-fill {
-  width: 42%;
-  animation: ils-build-progress-indeterminate 1.15s ease-in-out infinite;
+  width: 34%;
+  transform: translateX(-125%);
+  animation: ils-build-progress-indeterminate 1.7s cubic-bezier(.4,0,.2,1) infinite;
+}
+
+.pipeline-flow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pipeline-flow .pipeline-step {
+  position: relative;
+  transition: opacity .35s ease, transform .35s ease, background-color .35s ease, border-color .35s ease;
+}
+
+.pipeline-flow .pipeline-step i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .45;
+  vertical-align: 1px;
+}
+
+.pipeline-flow .pipeline-step.active {
+  transform: translateY(-1px);
+}
+
+.pipeline-flow .pipeline-step.active i {
+  opacity: 1;
+  animation: ils-build-stage-pulse 1.45s ease-in-out infinite;
+}
+
+.pipeline-flow .pipeline-step.done i {
+  opacity: .8;
+}
+
+.git-build-meta {
+  font-variant-numeric: tabular-nums;
 }
 
 @keyframes ils-build-progress-indeterminate {
-  0% { transform: translateX(-120%); }
-  55% { transform: translateX(115%); }
-  100% { transform: translateX(245%); }
+  0% { transform: translateX(-125%); }
+  55% { transform: translateX(150%); }
+  100% { transform: translateX(310%); }
+}
+
+@keyframes ils-build-shine {
+  0% { transform: translateX(-160%); opacity: 0; }
+  20% { opacity: .45; }
+  65% { opacity: .7; }
+  100% { transform: translateX(330%); opacity: 0; }
+}
+
+@keyframes ils-build-stage-pulse {
+  0%,100% { transform: scale(.78); opacity: .55; }
+  50% { transform: scale(1.35); opacity: 1; }
+}
+
+@keyframes ils-build-running-edge {
+  from { background-position: 0 -110%; }
+  to { background-position: 0 110%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .job-progress.indeterminate .job-progress-fill {
-    animation-duration: 2.4s;
+  .job-progress-indeterminate .job-progress-fill,
+  .job-progress-shine,
+  .pipeline-flow .pipeline-step.active i,
+  .build-job.build-running::before {
+    animation-duration: 4s;
   }
 }
