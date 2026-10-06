@@ -11,6 +11,11 @@ import {initIOS} from './js/ios.js';
 import {initServices} from './js/services.js';
 import {initAutomation} from './js/automation.js';
 
+const releaseCardStyles=document.createElement('link');
+releaseCardStyles.rel='stylesheet';
+releaseCardStyles.href='/release-cards.css';
+document.head.append(releaseCardStyles);
+
 initCore();
 initPlatformUI();
 initNavigation();
