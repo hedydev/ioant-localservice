@@ -6,6 +6,10 @@ import {platformIcons,targetsForProfile,projectAppIcon} from './platform-ui.js';
 
 let appleSigningTeams=[];
 
+function buildTypeLabel(value){
+ return ({native:'Native',expo:'Expo / React Native','hybrid-web-native':'Hybrid Web-Native',tauri:'Tauri / Rust'})[value]||value||'Native';
+}
+
 function teamLabel(team){
  const identity=team.identities?.[0]||'';
  const short=identity.replace(/\s*\([A-Z0-9]{10}\)\s*$/,'');
@@ -69,16 +73,18 @@ function profileSummary(profile){
    (profile.testflight_create_group?' · 不存在时自动创建':'')+
    (profile.testflight_submit_beta_review?' · 自动提交 Beta Review':'')
   :'';
- return platformIcons(targetsForProfile(profile))+(profile.platform==='ios'?'iOS':profile.platform==='macos'?'macOS':escapeHTML(profile.platform))+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+'<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team+testflight+group;
+ return platformIcons(targetsForProfile(profile))+(profile.platform==='ios'?'iOS':profile.platform==='macos'?'macOS':escapeHTML(profile.platform))+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+
+  '<br>构建类型 · '+escapeHTML(buildTypeLabel(profile.build_type))+' · 单脚本入口'+
+  '<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team+testflight+group;
 }
 
 function renderProfiles(){
  const source=buildState.source;
- const blocked=!source||source.configured===false||source.blocker;
- $('#new-release-profile').disabled=!source||source.configured===false;
+ const blocked=!source||source.configured===false;
+ $('#new-release-profile').disabled=blocked;
 
  if(!buildState.profiles.length){
-  $('#release-profiles').innerHTML='<div class="profile-empty"><strong>还没有 ILS Release Profile</strong><p>在 ILS 中保存这个项目的构建、打包与发布参数。</p><button data-create-profile>创建 Release Profile</button></div>';
+  $('#release-profiles').innerHTML='<div class="profile-empty"><strong>还没有 ILS Release Profile</strong><p>每个 Profile 描述构建类型和发布目标，但真正执行始终由一个标准脚本完成。</p><button data-create-profile>创建 Release Profile</button></div>';
   return;
  }
 
@@ -92,8 +98,8 @@ function renderProfiles(){
    '</div>'+
    '<p class="meta">'+profileSummary(profile)+'</p>'+
    (teamRequired?'<div class="job-message">检测到多个 Apple Signing Team；请先编辑 Profile 并选择 Apple Team。</div>':'')+
-   '<details><summary>查看命令</summary><p><strong>Build</strong></p><pre>'+escapeHTML(profile.build_command)+'</pre>'+
-    (profile.package_command?'<p><strong>Package</strong></p><pre>'+escapeHTML(profile.package_command)+'</pre>':'')+
+   '<details><summary>查看标准脚本入口</summary><p><strong>Build</strong></p><pre>'+escapeHTML(profile.build_command)+'</pre>'+
+    (profile.package_command?'<p><strong>Package（兼容）</strong></p><pre>'+escapeHTML(profile.package_command)+'</pre>':'')+
    '</details>'+
   '</article>';
  }).join('');
@@ -154,8 +160,8 @@ function syncProfileForm(){
  $('#profile-contract-help').textContent=legacy
   ?'兼容模式：ILS 根据 Artifact Path 发布；macOS 还需要 version/build 命令。'
   :(lane.value==='ios-testflight'
-    ?'TestFlight：脚本上传 App Store Connect，并写入 ILS_OUTPUT_DIR/ils-result.json；不会创建伪造的本地安装包记录。'
-    :'标准模式：脚本写入 ILS_OUTPUT_DIR/ils-result.json，ILS 验证最终产物后负责发布。');
+    ?'单脚本模式：项目脚本完成预检查、构建和 TestFlight 上传，并写入 ILS_OUTPUT_DIR/ils-result.json。'
+    :'单脚本模式：项目脚本完成项目内部所有构建步骤，写入 ILS_OUTPUT_DIR/ils-result.json，ILS 验证并发布最终产物。');
 }
 
 function openProfile(profile=null){
@@ -173,6 +179,7 @@ function openProfile(profile=null){
  form.elements.variant.value='default';
  form.elements.lane.value='ios-adhoc';
  form.elements.result_contract.value='ils-result-v1';
+ form.elements.build_type.value='native';
  const selectedTeam=profile?.apple_team_id||'';
  if(profile){
   for(const [key,value] of Object.entries(profile)){
@@ -233,7 +240,7 @@ export function initBuildProfiles(){
    });
    $('#profile-dialog').close();
    await loadReleaseProfiles();
-   notice('ILS Release Profile 已保存到本机 ILS 数据目录。');
+   notice('ILS Release Profile 已保存。构建时只运行这一条标准脚本入口。');
   }catch(error){
    event.target.querySelector('.form-error').textContent=error.message;
   }finally{
