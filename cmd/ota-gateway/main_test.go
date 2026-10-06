@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -73,7 +77,55 @@ func TestHealthReportsGatewayProcess(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d", res.Code)
 	}
-	if got := res.Body.String(); !strings.Contains(got, `"ok":true`) || !strings.Contains(got, `"service":"ils-adhoc-ota"`) {
+	if got := res.Body.String(); !strings.Contains(got, `"ok":true`) || !strings.Contains(got, `"service":"ils-adhoc-ota"`) || !strings.Contains(got, `"profile_signed":false`) {
 		t.Fatalf("health body = %q", got)
+	}
+}
+
+func TestCollectedEnrollmentPageExplainsProfileCanBeRemoved(t *testing.T) {
+	g := &gateway{}
+	req := httptest.NewRequest(http.MethodGet, "/enroll?collected=1", nil)
+	res := httptest.NewRecorder()
+	g.enrollPage(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d", res.Code)
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, "设备登记已完成") || !strings.Contains(body, "现在可以删除") || !strings.Contains(body, "删除不会取消已经完成的设备登记") {
+		t.Fatalf("completion page missing removal guidance: %q", body)
+	}
+	if strings.Contains(body, `href="/enroll.mobileconfig"`) {
+		t.Fatal("completion page unexpectedly offers another enrollment download")
+	}
+}
+
+func TestSignProfileProducesEmbeddedCMSPayload(t *testing.T) {
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("openssl unavailable")
+	}
+	dir := t.TempDir()
+	cert := filepath.Join(dir, "cert.pem")
+	key := filepath.Join(dir, "key.pem")
+	cmd := exec.Command("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=ota.example.test")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generate signing identity: %v\n%s", err, out)
+	}
+	g := &gateway{profileSigningCert: cert, profileSigningKey: key}
+	payload := []byte(`<?xml version="1.0"?><plist><dict><key>PayloadType</key><string>Profile Service</string></dict></plist>`)
+	signed, err := g.signProfile(context.Background(), payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(signed, payload) {
+		t.Fatal("profile was not wrapped in CMS")
+	}
+	verify := exec.Command("openssl", "cms", "-verify", "-inform", "DER", "-noverify")
+	verify.Stdin = bytes.NewReader(signed)
+	decoded, err := verify.Output()
+	if err != nil {
+		t.Fatalf("verify signed profile: %v", err)
+	}
+	if !bytes.Equal(decoded, payload) {
+		t.Fatalf("decoded payload mismatch\n got: %q\nwant: %q", decoded, payload)
 	}
 }
