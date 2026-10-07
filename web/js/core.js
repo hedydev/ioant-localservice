@@ -26,13 +26,40 @@ function writeCachedAdminToken(token){
  }
 }
 
+async function fetchWithTimeout(path,options={},timeoutMs=10000){
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),timeoutMs);
+ try{
+  return await fetch(path,{...options,signal:options.signal||controller.signal});
+ }catch(error){
+  if(error?.name==='AbortError')throw new Error('请求超时');
+  throw error;
+ }finally{
+  clearTimeout(timer);
+ }
+}
+
 export async function api(path,options={}){
  const epoch=state.authEpoch;
- const response=await fetch(path,{...options,headers:{...(state.admin?{Authorization:'Bearer '+state.token}:{}),...options.headers}});
- const data=await response.json();
- if(epoch!==state.authEpoch)throw new Error('管理会话已更改，请重新操作');
- if((response.status===401||response.status===403)&&state.admin)setAdmin(false);
- if(!response.ok)throw new Error(data.error||'请求失败');
+ const authenticatedAtStart=state.admin;
+ const timeoutMs=options.timeoutMs??10000;
+ const {timeoutMs:_timeoutMs,...fetchOptions}=options;
+ const response=await fetchWithTimeout(path,{
+  ...fetchOptions,
+  headers:{...(authenticatedAtStart?{Authorization:'Bearer '+state.token}:{}),...fetchOptions.headers}
+ },timeoutMs);
+ let data={};
+ const raw=await response.text();
+ if(raw){
+  try{data=JSON.parse(raw);}
+  catch{data={};}
+ }
+ // Public requests remain valid when a remembered admin session finishes
+ // restoring in parallel. Only requests that started authenticated are tied to
+ // the authentication epoch.
+ if(authenticatedAtStart&&epoch!==state.authEpoch)throw new Error('管理会话已更改，请重新操作');
+ if((response.status===401||response.status===403)&&authenticatedAtStart&&state.admin)setAdmin(false);
+ if(!response.ok)throw new Error(data.error||('请求失败（HTTP '+response.status+'）'));
  return data;
 }
 
@@ -106,7 +133,7 @@ export async function restoreAdminSession(){
  button.disabled=true;
  button.textContent='恢复管理状态…';
  try{
-  const response=await fetch('/api/admin/session',{headers:{Authorization:'Bearer '+token}});
+  const response=await fetchWithTimeout('/api/admin/session',{headers:{Authorization:'Bearer '+token}},3000);
   let result={};
   try{result=await response.json();}catch{}
   if(response.status===401||response.status===403){
@@ -120,7 +147,9 @@ export async function restoreAdminSession(){
   }
   setAdmin(true,token);
  }catch(error){
-  // A stopped/restarting ILS must not erase the browser's remembered token.
+  // A stopped/restarting/slow ILS must not erase the browser's remembered token.
+  // Public project bootstrap continues independently and a later refresh/reopen
+  // can restore this cached session again.
   console.warn('ILS admin session restore deferred:',error);
  }finally{
   button.disabled=false;
@@ -142,8 +171,9 @@ export function initCore(){
   button.disabled=true;
   $('#admin-error').textContent='';
   try{
-   const response=await fetch('/api/admin/session',{headers:{Authorization:'Bearer '+token}});
-   const result=await response.json();
+   const response=await fetchWithTimeout('/api/admin/session',{headers:{Authorization:'Bearer '+token}},10000);
+   let result={};
+   try{result=await response.json();}catch{}
    if(!response.ok||result.authenticated!==true)throw new Error(result.error||'管理员验证失败');
    if(!$('#admin-dialog').open||attempt!==adminAttempt)return;
    $('#token').value='';
