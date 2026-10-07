@@ -5,19 +5,40 @@ import (
 	"testing"
 )
 
-func TestProjectBootstrapIsIndependentFromAdminAndReleaseLoading(t *testing.T) {
+func TestProjectBootstrapIsIndependentFromAdminAndOptionalModules(t *testing.T) {
 	appRaw, err := Files.ReadFile("app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	app := string(appRaw)
 	if strings.Contains(app, "await restoreAdminSession()") {
-		t.Fatal("project bootstrap must not await administrator-session restoration")
+		t.Fatal("core project bootstrap must not await administrator-session restoration")
+	}
+	for _, forbidden := range []string{
+		"import {initBuildJobs}",
+		"import {initAutomation}",
+		"import {initAppStoreConnect}",
+	} {
+		if strings.Contains(app, forbidden) {
+			t.Fatalf("optional module must not be a static bootstrap dependency: %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"initCore();",
+		"initProjects();",
+		"await import(path)",
+		"Promise.all(optionalModules.map(initOptionalModule))",
+		"void finishBootstrap();",
+		"部分功能模块初始化失败",
+	} {
+		if !strings.Contains(app, required) {
+			t.Fatalf("app.js missing fault-isolated bootstrap guard %q", required)
+		}
 	}
 	projectsIndex := strings.Index(app, "initProjects();")
-	restoreIndex := strings.Index(app, "void restoreAdminSession();")
-	if projectsIndex < 0 || restoreIndex < 0 || projectsIndex > restoreIndex {
-		t.Fatal("public project bootstrap must start before async admin restoration")
+	finishIndex := strings.Index(app, "void finishBootstrap();")
+	if projectsIndex < 0 || finishIndex < 0 || projectsIndex > finishIndex {
+		t.Fatal("public project bootstrap must start before optional-module/admin bootstrap")
 	}
 
 	projectsRaw, err := Files.ReadFile("js/projects.js")
