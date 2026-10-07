@@ -353,7 +353,7 @@ export function initBuildJobs(){
   buildState.logLoaded=false;
   buildState.logScrollTop=0;
   loadBuildJobs();
- };
+ });
  window.addEventListener('project-changed',resetJobs);
  window.addEventListener('admin-cleared',resetJobs);
  window.addEventListener('admin-loaded',()=>{
