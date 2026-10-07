@@ -1,14 +1,9 @@
-
 import {$,state} from './core.js';
+import {readRoute,writeRoute,validViews} from './router.js';
+import {selectProject} from './projects.js';
 
-const validViews=new Set(['services','overview','builds','releases','ios','automation']);
 const adminViews=new Set(['services','builds','automation']);
 const labels={overview:'项目概览',builds:'构建与发布',releases:'版本历史',ios:'iOS 发布',automation:'自动化 / API'};
-
-function requestedView(){
- const value=location.hash.replace(/^#/,'');
- return validViews.has(value)?value:'overview';
-}
 
 function updateHeading(){
  if(state.view==='services')return;
@@ -59,7 +54,7 @@ function updatePageShell(){
  }
 }
 
-export function activateView(requested,{updateHash=true}={}){
+export function activateView(requested,{updateRoute=true,replaceRoute=false}={}){
  let view=validViews.has(requested)?requested:'overview';
  if(adminViews.has(view)&&!state.admin)view='overview';
  state.view=view;
@@ -74,8 +69,33 @@ export function activateView(requested,{updateHash=true}={}){
  updateHeading();
  updateNavigationSelection();
 
- if(updateHash&&location.hash!=='#'+view)history.replaceState(null,'','#'+view);
+ if(updateRoute){
+  if(view==='services')writeRoute(null,'services',{replace:replaceRoute});
+  else if(state.project)writeRoute(state.project,view,{replace:replaceRoute});
+ }
  window.dispatchEvent(new CustomEvent('view-changed',{detail:{view}}));
+ return view;
+}
+
+async function applyRoute({canonicalize=false}={}){
+ const route=readRoute();
+ if(route.kind==='project'&&route.project&&route.project!==state.project){
+  await selectProject(route.project,{updateRoute:false});
+ }
+ const requested=route.kind==='global'?'services':route.view;
+ const actual=activateView(requested,{updateRoute:false});
+
+ if(route.kind==='global'){
+  if(actual==='services'){
+   if(canonicalize||route.legacy)writeRoute(null,'services',{replace:true});
+  }else if(state.project){
+   writeRoute(state.project,actual,{replace:true});
+  }
+  return;
+ }
+ if(state.project&&(canonicalize||route.legacy||route.project!==state.project||route.view!==actual)){
+  writeRoute(state.project,actual,{replace:true});
+ }
 }
 
 export function initNavigation(){
@@ -89,15 +109,11 @@ export function initNavigation(){
   const button=event.target.closest('[data-global-view]');
   if(button)activateView(button.dataset.globalView);
  });
- $('#projects').addEventListener('click',event=>{
-  const button=event.target.closest('[data-project]');
-  if(button&&state.view==='services')activateView('overview');
- });
  document.addEventListener('click',event=>{
   const button=event.target.closest('[data-go-view]');
   if(button)activateView(button.dataset.goView);
  });
- window.addEventListener('hashchange',()=>activateView(requestedView(),{updateHash:false}));
+ window.addEventListener('hashchange',()=>{void applyRoute();});
  window.addEventListener('data-refreshed',()=>{
   updateHeading();
   updateNavigationSelection();
@@ -108,12 +124,11 @@ export function initNavigation(){
  });
  window.addEventListener('admin-loaded',()=>{
   updateGlobalNavigationVisibility();
-  activateView(requestedView());
+  void applyRoute({canonicalize:true});
  });
  window.addEventListener('admin-cleared',()=>{
   updateGlobalNavigationVisibility();
-  if(adminViews.has(state.view))activateView('overview');
-  else activateView(state.view);
+  void applyRoute({canonicalize:true});
  });
- activateView(requestedView(),{updateHash:false});
+ void applyRoute({canonicalize:true});
 }
