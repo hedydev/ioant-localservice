@@ -77,13 +77,20 @@ export function activateView(requested,{updateRoute=true,replaceRoute=false}={})
  return view;
 }
 
-async function applyRoute({canonicalize=false}={}){
+async function applyRoute({canonicalize=false,adminResolved=false}={}){
  const route=readRoute();
  if(route.kind==='project'&&route.project&&route.project!==state.project){
   await selectProject(route.project,{updateRoute:false});
  }
  const requested=route.kind==='global'?'services':route.view;
+ const adminDenied=adminViews.has(requested)&&!state.admin;
  const actual=activateView(requested,{updateRoute:false});
+
+ // A remembered administrator session restores asynchronously. Keep the
+ // requested admin route intact until that restore has had a chance to finish;
+ // otherwise a direct #/projects/.../builds URL would be rewritten to overview
+ // just before admin-loaded can restore it.
+ if(adminDenied&&!adminResolved)return;
 
  if(route.kind==='global'){
   if(actual==='services'){
@@ -124,11 +131,11 @@ export function initNavigation(){
  });
  window.addEventListener('admin-loaded',()=>{
   updateGlobalNavigationVisibility();
-  void applyRoute({canonicalize:true});
+  void applyRoute({canonicalize:true,adminResolved:true});
  });
  window.addEventListener('admin-cleared',()=>{
   updateGlobalNavigationVisibility();
-  void applyRoute({canonicalize:true});
+  void applyRoute({canonicalize:true,adminResolved:true});
  });
  void applyRoute({canonicalize:true});
 }
