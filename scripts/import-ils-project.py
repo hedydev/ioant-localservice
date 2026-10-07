@@ -8,6 +8,7 @@ machine-local source paths, Apple Team selection, credentials, and runtime state
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import pathlib
 import re
@@ -57,6 +58,25 @@ def load_json(path: pathlib.Path) -> dict:
     return value
 
 
+def local_ils_url(base: str) -> bool:
+    host = (urllib.parse.urlsplit(base).hostname or "").lower()
+    if host == "localhost" or host.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private or address.is_link_local
+
+
+def url_opener(base: str):
+    # urllib inherits shell/system proxy configuration. ILS normally runs on
+    # loopback/LAN, which must never be sent through an HTTP proxy.
+    if local_ils_url(base):
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener()
+
+
 def api(base: str, token: str, method: str, path: str, payload=None):
     url = base.rstrip("/") + path
     body = None
@@ -66,7 +86,7 @@ def api(base: str, token: str, method: str, path: str, payload=None):
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with url_opener(base).open(request, timeout=30) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
         raw = exc.read()
@@ -74,9 +94,10 @@ def api(base: str, token: str, method: str, path: str, payload=None):
             detail = json.loads(raw.decode("utf-8")).get("error", raw.decode("utf-8"))
         except Exception:
             detail = raw.decode("utf-8", errors="replace")
-        die(f"ILS {method} {path} returned HTTP {exc.code}: {detail}")
+        suffix = detail or "empty response body"
+        die(f"ILS {method} {path} returned HTTP {exc.code}: {suffix}")
     except urllib.error.URLError as exc:
-        die(f"cannot connect to ILS at {base}: {exc.reason}")
+        die(f"cannot connect directly to ILS at {base}: {exc.reason}")
     if not raw:
         return None
     try:
