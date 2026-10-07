@@ -28,5 +28,8 @@ initServices();
 initAppStoreConnect();
 initAutomation();
 
-await restoreAdminSession();
+// Public project data must never wait for administrator-session restoration.
+// Admin-only modules already listen for admin-loaded and will hydrate when the
+// remembered session finishes restoring.
 initProjects();
+void restoreAdminSession();
