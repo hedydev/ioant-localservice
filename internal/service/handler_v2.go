@@ -32,6 +32,7 @@ func (a *App) HandlerV2() http.Handler {
 	})
 	mux.HandleFunc("POST /api/projects", a.createProject)
 	mux.HandleFunc("GET /api/projects/{project}/releases", a.listReleases)
+	mux.HandleFunc("GET /api/projects/{project}/internal-test-records", a.listInternalTestRecords)
 	mux.HandleFunc("POST /api/projects/{project}/releases", a.upload)
 	mux.HandleFunc("GET /api/projects/{project}/icon", a.projectIcon)
 	mux.HandleFunc("GET /api/builds/{job}/icon", a.buildIcon)
