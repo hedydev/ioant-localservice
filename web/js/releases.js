@@ -16,7 +16,7 @@ function internalTestVariant(record){
  return record.variant||'default';
 }
 
-function internalTestCard(record,{featured=false,showDetails=false}={}){
+function internalTestCard(record,{featured=false,showDetails=false,allowDelete=false}={}){
  const version=record.version||'Internal Test';
  const meta=[
   record.build?'build '+record.build:'',
@@ -28,6 +28,9 @@ function internalTestCard(record,{featured=false,showDetails=false}={}){
  const download='<button type="button" class="download" data-history-internal-download="'+escapeHTML(record.id)+'" data-artifact-name="'+escapeHTML(record.filename||'Internal-Test')+'">下载 '+escapeHTML((record.filename||'测试包').split('.').pop().toUpperCase())+'</button>';
  const details=showDetails
   ?'<details><summary>构建信息</summary><p>Internal Test 只生成测试安装包，不创建正式 Release，也不进行公证或正式发布。</p><p>'+escapeHTML(record.filename||'')+'</p></details>'
+  :'';
+ const deleteAction=allowDelete
+  ?'<div class="download-row release-delete-row"><button type="button" class="danger" data-delete-history-build="'+escapeHTML(record.id)+'">删除测试包</button><span class="meta">同时删除这个 Internal Test 的构建记录、日志和产物。</span></div>'
   :'';
  return '<article class="release release-card'+(featured?' featured':'')+'">'+
   '<div class="release-top">'+
@@ -42,6 +45,7 @@ function internalTestCard(record,{featured=false,showDetails=false}={}){
   '<p class="release-notes">'+escapeHTML(record.notes||'Internal Test 构建产物，可直接下载测试。')+'</p>'+
   '<div class="download-row">'+download+'<span class="meta">'+formatSize(record.size||0)+' · '+escapeHTML(record.architecture||'')+' · '+escapeHTML(internalTestVariant(record))+'</span></div>'+
   details+
+  deleteAction+
  '</article>';
 }
 
@@ -88,10 +92,10 @@ function currentDistributions(){
  return [...latest.values()].sort((a,b)=>recordTime(b)-recordTime(a));
 }
 
-function renderHistoryCard(row,{featured=false,showDetails=false}={}){
+function renderHistoryCard(row,{featured=false,showDetails=false,allowDelete=false}={}){
  return row.kind==='internal-test'
-  ?internalTestCard(row.value,{featured,showDetails})
-  :renderReleaseCard(row.value,{featured,showDetails});
+  ?internalTestCard(row.value,{featured,showDetails,allowDelete})
+  :renderReleaseCard(row.value,{featured,showDetails,allowDelete});
 }
 
 function renderOverview(){
@@ -131,7 +135,7 @@ function renderReleaseHistory(){
   $('#releases').innerHTML='<div class="empty"><strong>还没有匹配的记录</strong>调整平台、渠道或发布筛选。</div>';
   return;
  }
- $('#releases').innerHTML=rows.map(row=>renderHistoryCard(row,{showDetails:true})).join('');
+ $('#releases').innerHTML=rows.map(row=>renderHistoryCard(row,{showDetails:true,allowDelete:state.admin})).join('');
 }
 
 function renderReleases(){
@@ -165,6 +169,52 @@ async function downloadInternalArtifact(jobID,name,button){
  }catch(error){
   notice(error.message,'error');
  }finally{
+  button.disabled=false;
+  button.textContent=old;
+ }
+}
+
+async function deleteReleaseRecord(button){
+ if(!needAdmin())return;
+ const id=button.dataset.deleteRelease||'';
+ const release=state.releases.find(item=>item.id===id);
+ if(!release)return notice('发布记录已经不存在。','error');
+ let message='删除 '+(release.filename||release.version||'这个安装包')+' 以及 ILS 中的发布记录？\n\n此操作不能撤销。';
+ if(release.ota?.status==='synced'||release.ota?.public_url||release.ota?.artifact_url||release.ota?.manifest_url){
+  message+='\n\n这个版本已同步到 OTA Gateway。ILS 会先删除公网 IPA / manifest；远端清理失败时不会删除本地记录。';
+ }
+ if(!confirm(message))return;
+ const old=button.textContent;
+ button.disabled=true;
+ button.textContent='正在删除…';
+ try{
+  const result=await api('/api/releases/'+encodeURIComponent(id),{method:'DELETE'});
+  await refreshData();
+  window.dispatchEvent(new CustomEvent('release-record-deleted',{detail:{releaseID:id}}));
+  notice(result.warning||'安装包和发布记录已删除。',result.warning?'error':'info');
+ }catch(error){
+  notice(error.message,'error');
+  button.disabled=false;
+  button.textContent=old;
+ }
+}
+
+async function deleteInternalTestRecord(button){
+ if(!needAdmin())return;
+ const id=button.dataset.deleteHistoryBuild||'';
+ const record=state.internalTests.find(item=>item.id===id);
+ if(!record)return notice('Internal Test 记录已经不存在。','error');
+ if(!confirm('删除 '+(record.filename||'这个 Internal Test 测试包')+'？\n\n对应构建记录、日志和测试包都会删除，此操作不能撤销。'))return;
+ const old=button.textContent;
+ button.disabled=true;
+ button.textContent='正在删除…';
+ try{
+  await api('/api/builds/'+encodeURIComponent(id),{method:'DELETE'});
+  await refreshData();
+  window.dispatchEvent(new CustomEvent('build-record-deleted',{detail:{jobID:id}}));
+  notice('Internal Test 构建记录、日志和测试包已删除。');
+ }catch(error){
+  notice(error.message,'error');
   button.disabled=false;
   button.textContent=old;
  }
@@ -206,11 +256,21 @@ export function initReleases(){
 
  const handleInternalDownload=event=>{
   const button=event.target.closest('[data-history-internal-download]');
-  if(!button)return;
+  if(!button)return false;
   void downloadInternalArtifact(button.dataset.historyInternalDownload,button.dataset.artifactName,button);
+  return true;
  };
  $('#overview-latest').addEventListener('click',handleInternalDownload);
- $('#releases').addEventListener('click',handleInternalDownload);
+ $('#releases').addEventListener('click',event=>{
+  if(handleInternalDownload(event))return;
+  const releaseDelete=event.target.closest('[data-delete-release]');
+  if(releaseDelete){
+   void deleteReleaseRecord(releaseDelete);
+   return;
+  }
+  const internalDelete=event.target.closest('[data-delete-history-build]');
+  if(internalDelete)void deleteInternalTestRecord(internalDelete);
+ });
 
  $('#publish-button').onclick=()=>{
   if(!needAdmin())return;
