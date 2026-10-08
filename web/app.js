@@ -4,7 +4,7 @@ import {initProjects,refreshData} from './js/projects.js';
 const releaseCardStyles=document.createElement('link');
 releaseCardStyles.rel='stylesheet';
 releaseCardStyles.href='/release-cards.css';
-document.head.append(releaseCardStyles);
+document.head.appendChild(releaseCardStyles);
 
 const optionalModules=[
  ['./js/platform-ui.js','initPlatformUI','平台 UI'],
@@ -12,6 +12,7 @@ const optionalModules=[
  ['./js/releases.js','initReleases','Release'],
  ['./js/build-source.js','initBuildSource','构建来源'],
  ['./js/build-profiles.js','initBuildProfiles','Release Profile'],
+ ['./js/internal-test-ui.js','initInternalTestUI','Internal Test UI'],
  ['./js/build-jobs.js','initBuildJobs','构建任务'],
  ['./js/build-log-live.js','initBuildLogLive','实时日志'],
  ['./js/ios.js','initIOS','iOS'],
