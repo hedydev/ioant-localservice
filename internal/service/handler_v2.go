@@ -34,6 +34,7 @@ func (a *App) HandlerV2() http.Handler {
 	mux.HandleFunc("GET /api/projects/{project}/releases", a.listReleases)
 	mux.HandleFunc("GET /api/projects/{project}/internal-test-records", a.listInternalTestRecords)
 	mux.HandleFunc("POST /api/projects/{project}/releases", a.upload)
+	mux.HandleFunc("DELETE /api/releases/{release}", a.deleteReleaseArtifactRecord)
 	mux.HandleFunc("GET /api/projects/{project}/icon", a.projectIcon)
 	mux.HandleFunc("GET /api/builds/{job}/icon", a.buildIcon)
 	mux.HandleFunc("GET /api/releases/{release}/icon", a.releaseIcon)
@@ -67,6 +68,7 @@ func (a *App) HandlerV2() http.Handler {
 	mux.HandleFunc("POST /api/projects/{project}/builds", a.startLocalCheckoutBuild)
 	mux.HandleFunc("POST /api/projects/{project}/internal-builds", a.startInternalTestBuild)
 	mux.HandleFunc("GET /api/projects/{project}/builds", a.buildJobsLocal)
+	mux.HandleFunc("DELETE /api/builds/{job}", a.deleteBuildRecord)
 	mux.HandleFunc("GET /api/builds/{job}/log", a.buildLogView)
 	mux.HandleFunc("GET /api/builds/{job}/artifact", a.downloadInternalBuildArtifact)
 	mux.Handle("GET /", http.FileServer(http.FS(a.static)))
@@ -76,10 +78,10 @@ func (a *App) HandlerV2() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		w.Header().Set("Cache-Control", "no-store")
-		if r.Method == http.MethodPost && r.Header.Get("Origin") != "" {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("Origin") != "" {
 			origin, err := url.Parse(r.Header.Get("Origin"))
 			if err != nil || origin.Host != r.Host {
-				fail(w, http.StatusForbidden, "不允许跨域发布")
+				fail(w, http.StatusForbidden, "不允许跨域修改")
 				return
 			}
 		}
