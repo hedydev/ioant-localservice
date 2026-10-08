@@ -65,7 +65,7 @@ func (a *App) HandlerV2() http.Handler {
 	mux.HandleFunc("DELETE /api/projects/{project}/release-profiles/{profile}", a.deleteReleaseProfileLocal)
 	mux.HandleFunc("POST /api/projects/{project}/builds", a.startLocalCheckoutBuild)
 	mux.HandleFunc("GET /api/projects/{project}/builds", a.buildJobsLocal)
-	mux.HandleFunc("GET /api/builds/{job}/log", a.buildLog)
+	mux.HandleFunc("GET /api/builds/{job}/log", a.buildLogView)
 	mux.Handle("GET /", http.FileServer(http.FS(a.static)))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
