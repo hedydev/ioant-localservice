@@ -1,5 +1,5 @@
 
-import {$,state,api,escapeHTML,formatDate} from './core.js';
+import {$,state,api,escapeHTML,formatDate,notice} from './core.js';
 import {buildState} from './build-state.js';
 import {platformIcons,targetsForJob,buildAppIcon} from './platform-ui.js';
 import {releaseStatusLabel,testFlightLifecycleView,testFlightLinkSource} from './release-ui.js';
@@ -91,6 +91,14 @@ function internalArtifactAction(job){
  return '<button type="button" class="build-artifact" data-download-internal-artifact="'+escapeHTML(job.id)+'" data-artifact-name="'+escapeHTML(name)+'">下载 '+escapeHTML(name)+'</button>';
 }
 
+function buildDeleteAction(job){
+ if(job.status==='running')return '';
+ const releaseCount=(job.release_ids||[]).length;
+ const internal=laneFor(job)==='macos-test'&&Boolean(job.result?.artifact);
+ const label=internal?'删除构建和测试包':'删除构建记录';
+ return '<div class="download-row build-delete-row"><button type="button" class="danger" data-delete-build-job="'+escapeHTML(job.id)+'" data-release-count="'+releaseCount+'" data-has-internal-artifact="'+(internal?'1':'0')+'">'+escapeHTML(label)+'</button></div>';
+}
+
 async function downloadInternalArtifact(jobID,name,button){
  const oldText=button.textContent;
  button.disabled=true;
@@ -122,6 +130,37 @@ async function downloadInternalArtifact(jobID,name,button){
   button.disabled=false;
  }
  button.textContent=oldText;
+}
+
+async function deleteBuildJob(button){
+ const jobID=button.dataset.deleteBuildJob||'';
+ const releaseCount=Number(button.dataset.releaseCount||0);
+ const hasInternalArtifact=button.dataset.hasInternalArtifact==='1';
+ let message=hasInternalArtifact
+  ?'删除这个历史构建任务、日志和 Internal Test 测试包？'
+  :'删除这个历史构建任务及日志？';
+ if(releaseCount>0){
+  message+='\n\n它关联的 '+releaseCount+' 个正式 Release / 已发布安装包不会被删除。';
+ }
+ message+='\n\n此操作不能撤销。';
+ if(!confirm(message))return;
+ const old=button.textContent;
+ button.disabled=true;
+ button.textContent='正在删除…';
+ try{
+  await api('/api/builds/'+encodeURIComponent(jobID),{method:'DELETE'});
+  if(buildState.activeLog===jobID)buildState.activeLog=null;
+  buildState.collapsedLogs.delete(jobID);
+  buildState.progressByJob.delete(jobID);
+  button.closest('[data-build-job-id]')?.remove();
+  window.dispatchEvent(new CustomEvent('build-record-deleted',{detail:{jobID}}));
+  notice(hasInternalArtifact?'构建记录、日志和 Internal Test 测试包已删除。':'构建记录和日志已删除。');
+  await loadBuildJobs();
+ }catch(error){
+  notice(error.message,'error');
+  button.disabled=false;
+  button.textContent=old;
+ }
 }
 
 function stageLabel(job){
@@ -274,7 +313,8 @@ function jobMainHTML(job){
   resultView(job)+
   internalArtifactAction(job)+
   (releases.length?'<div class="meta">关联发布：'+releases.length+' 个</div>':'')+
-  linkedReleaseActions(job);
+  linkedReleaseActions(job)+
+  buildDeleteAction(job);
 }
 
 function ensureLogPanel(article,job,expanded){
@@ -377,6 +417,11 @@ export function initBuildJobs(){
    void downloadInternalArtifact(artifactButton.dataset.downloadInternalArtifact,artifactButton.dataset.artifactName,artifactButton);
    return;
   }
+  const deleteButton=event.target.closest('[data-delete-build-job]');
+  if(deleteButton){
+   void deleteBuildJob(deleteButton);
+   return;
+  }
   const button=event.target.closest('[data-build-log]');
   if(!button)return;
   const jobID=button.dataset.buildLog;
@@ -400,6 +445,9 @@ export function initBuildJobs(){
   buildState.logLoaded=false;
   buildState.logScrollTop=0;
   loadBuildJobs();
+ });
+ window.addEventListener('release-record-deleted',()=>{
+  if(state.view==='builds')loadBuildJobs();
  });
  window.addEventListener('project-changed',resetJobs);
  window.addEventListener('admin-cleared',resetJobs);
