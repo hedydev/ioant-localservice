@@ -87,6 +87,44 @@ func (a *App) deleteReleaseFromOTAGateway(ctx context.Context, release Release) 
 	return nil
 }
 
+func (a *App) unlinkReleaseFromBuildJob(release Release) error {
+	if release.BuildJobID == "" || !historyRecordIDRE.MatchString(release.BuildJobID) {
+		return nil
+	}
+
+	a.buildMu.Lock()
+	defer a.buildMu.Unlock()
+	path := a.buildJobPath(release.BuildJobID)
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var job BuildJob
+	if err = json.Unmarshal(raw, &job); err != nil {
+		return err
+	}
+	filtered := make([]string, 0, len(job.ReleaseIDs))
+	for _, id := range job.ReleaseIDs {
+		if id != release.ID {
+			filtered = append(filtered, id)
+		}
+	}
+	job.ReleaseIDs = filtered
+	if receipts, ok := a.buildReceipts[release.BuildJobID]; ok {
+		kept := make([]string, 0, len(receipts))
+		for _, id := range receipts {
+			if id != release.ID {
+				kept = append(kept, id)
+			}
+		}
+		a.buildReceipts[release.BuildJobID] = kept
+	}
+	return atomicJSON(path, job)
+}
+
 func (a *App) deleteReleaseArtifactRecord(w http.ResponseWriter, r *http.Request) {
 	if !a.authorized(w, r) {
 		return
@@ -175,6 +213,12 @@ func (a *App) deleteReleaseArtifactRecord(w http.ResponseWriter, r *http.Request
 		}
 	}
 	_ = os.Remove(a.releaseIconPath(id))
+	if err := a.unlinkReleaseFromBuildJob(release); err != nil {
+		if warning != "" {
+			warning += "；"
+		}
+		warning += "构建任务中的发布关联清理失败"
+	}
 	respond(w, http.StatusOK, map[string]any{
 		"deleted":            true,
 		"release_id":         id,
