@@ -79,6 +79,51 @@ function linkedReleaseActions(job){
  }).join(' ');
 }
 
+function internalArtifactName(job){
+ const raw=job.result?.artifact||'';
+ const parts=raw.split(/[\\/]/);
+ return parts[parts.length-1]||'Internal-Test';
+}
+
+function internalArtifactAction(job){
+ if(laneFor(job)!=='macos-test'||job.status!=='succeeded'||!job.result?.artifact)return '';
+ const name=internalArtifactName(job);
+ return '<button type="button" class="build-artifact" data-download-internal-artifact="'+escapeHTML(job.id)+'" data-artifact-name="'+escapeHTML(name)+'">下载 '+escapeHTML(name)+'</button>';
+}
+
+async function downloadInternalArtifact(jobID,name,button){
+ const oldText=button.textContent;
+ button.disabled=true;
+ button.textContent='准备下载…';
+ try{
+  const response=await fetch('/api/builds/'+encodeURIComponent(jobID)+'/artifact',{
+   headers:{Authorization:'Bearer '+state.token}
+  });
+  if(!response.ok){
+   let message='下载失败（HTTP '+response.status+'）';
+   try{const data=await response.json(); if(data?.error)message=data.error;}catch{}
+   throw new Error(message);
+  }
+  const blob=await response.blob();
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement('a');
+  link.href=url;
+  link.download=name||('ils-internal-test-'+jobID);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }catch(error){
+  console.warn('ILS internal artifact download failed:',error);
+  button.textContent='下载失败';
+  setTimeout(()=>{button.textContent=oldText;},1500);
+  return;
+ }finally{
+  button.disabled=false;
+ }
+ button.textContent=oldText;
+}
+
 function stageLabel(job){
  const stages={
   preflight:'预检查',pull:'正在拉取',build:'正在构建',archive:'正在归档',validate:'正在验证',
@@ -95,6 +140,7 @@ function stageLabel(job){
   if(job.stage==='processing')return 'Apple Processing';
   return 'ILS Release 待同步';
  }
+ if(job.status==='succeeded'&&laneFor(job)==='macos-test')return '测试包已生成';
  if(job.status==='succeeded')return '发布成功';
  return '失败';
 }
@@ -188,7 +234,7 @@ function pipelineView(job){
  }
  const lanes={
   'ios-adhoc':['preflight','archive','validate','export','publish','complete'],
-  'macos-test':['preflight','build','package','validate','publish','complete'],
+  'macos-test':['preflight','build','package','complete'],
   'macos-release':['preflight','build','package','notarize','validate','publish','complete']
  };
  const stages=lanes[lane]||['preflight','build','validate','publish','complete'];
@@ -226,6 +272,7 @@ function jobMainHTML(job){
   progressView(job)+
   (job.error?'<p>'+escapeHTML(job.error)+'</p>':'')+
   resultView(job)+
+  internalArtifactAction(job)+
   (releases.length?'<div class="meta">关联发布：'+releases.length+' 个</div>':'')+
   linkedReleaseActions(job);
 }
@@ -300,11 +347,6 @@ export async function loadBuildJobs(){
   const jobs=await api('/api/projects/'+project+'/builds');
   if(project!==state.project)return;
   renderJobs(jobs);
-  if(buildState.activeLog){
-   const data=await api('/api/builds/'+buildState.activeLog+'/log');
-   if(project!==state.project)return;
-   updateBuildLog(buildState.activeLog,data.log);
-  }
  }catch(error){
   if(project!==state.project)return;
   const container=$('#build-jobs');
@@ -330,6 +372,11 @@ export function initBuildJobs(){
  ensureBuildJobsStyles();
  const container=$('#build-jobs');
  container.onclick=event=>{
+  const artifactButton=event.target.closest('[data-download-internal-artifact]');
+  if(artifactButton){
+   void downloadInternalArtifact(artifactButton.dataset.downloadInternalArtifact,artifactButton.dataset.artifactName,artifactButton);
+   return;
+  }
   const button=event.target.closest('[data-build-log]');
   if(!button)return;
   const jobID=button.dataset.buildLog;
