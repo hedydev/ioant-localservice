@@ -856,7 +856,8 @@ func validateContractResult(profile ReleaseProfile, result BuildResult, output s
 	return artifact, nil
 }
 
-// Bound disk use while continuing to drain process output.
+// Bound disk use while continuing to drain process output. Older log content is
+// rolled out so the newest compiler/signing errors remain available.
 type cappedLog struct {
 	mu      sync.Mutex
 	file    *os.File
@@ -866,18 +867,7 @@ type cappedLog struct {
 }
 
 func (l *cappedLog) emit(p string) {
-	left := (2 << 20) - l.written
-	if left <= 0 {
-		return
-	}
-	if len(p) > left {
-		p = p[:left]
-	}
-	_, _ = l.file.WriteString(p)
-	l.written += len(p)
-	if l.written == 2<<20 {
-		_, _ = l.file.WriteString("\n[日志达到 2 MiB 上限，后续输出省略]\n")
-	}
+	writeRollingBuildLog(l.file, &l.written, p)
 }
 func (l *cappedLog) Write(p []byte) (int, error) {
 	l.mu.Lock()
@@ -958,6 +948,10 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 	if e!=nil { finish("failed","无法创建日志"); return }
 	defer f.Close()
 	log:=&cappedLog{file:f,secret:a.token}; defer log.Flush()
+	commandFailure:=func(label string, commandErr error){
+		log.Flush()
+		finish("failed",buildFailureMessage(f.Name(),commandErr,ctx,label))
+	}
 	info,e:=inspectSource(source)
 	if e!=nil || info.Blocker!="" { finish("failed","执行前 Git 状态发生变化，请重新扫描"); return }
 	env:=append(os.Environ(),"GIT_TERMINAL_PROMPT=0")
@@ -965,7 +959,7 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 	pullCtx,pullCancel:=context.WithTimeout(ctx,3*time.Minute)
 	e=runProcess(pullCtx,source.Path,log,env,"git","-c","core.hooksPath=/dev/null","-c","rebase.autoStash=false","-c","merge.autoStash=false","pull","--ff-only")
 	pullCancel()
-	if e!=nil { finish("failed","git pull 失败，未执行构建；详情见日志"); return }
+	if e!=nil { log.Flush(); finish("failed",buildFailureMessage(f.Name(),e,pullCtx,"git pull")); return }
 	info,e=inspectSource(source)
 	if e!=nil || info.Blocker!="" { finish("failed","拉取后的 Git 状态不满足发布条件，请重新扫描"); return }
 	upstreamHead,e:=gitRead(source.Path,"rev-parse","@{upstream}")
@@ -1014,14 +1008,14 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 	if profile==nil {
 		j.Stage="script"; _=a.writeBuild(j)
 		fmt.Fprintf(log,"Source %s\nRun project script: /bin/bash %s\n",j.Commit,j.Script)
-		if e=runProcess(ctx,source.Path,jobLog,env,"/bin/bash",j.Script); e!=nil { finish("failed","项目发布脚本失败或任务超时；已上传的包会保留，请查看日志"); return }
+		if e=runProcess(ctx,source.Path,jobLog,env,"/bin/bash",j.Script); e!=nil { commandFailure("项目发布脚本",e); return }
 	} else {
 		j.Stage="build"; _=a.writeBuild(j)
 		fmt.Fprintf(log,"Source %s\nILS Release Profile: %s (%s)\n",j.Commit,profile.Name,profile.ID)
-		if e=runProcess(ctx,source.Path,jobLog,env,"/bin/bash","-lc",profile.BuildCommand); e!=nil { finish("failed","ILS Build Command 失败或任务超时；详情见日志"); return }
+		if e=runProcess(ctx,source.Path,jobLog,env,"/bin/bash","-lc",profile.BuildCommand); e!=nil { commandFailure("ILS Build Command",e); return }
 		if profile.PackageCommand!="" {
 			j.Stage="package"; _=a.writeBuild(j)
-			if e=runProcess(ctx,source.Path,jobLog,env,"/bin/bash","-lc",profile.PackageCommand); e!=nil { finish("failed","ILS Package Command 失败或任务超时；详情见日志"); return }
+			if e=runProcess(ctx,source.Path,jobLog,env,"/bin/bash","-lc",profile.PackageCommand); e!=nil { commandFailure("ILS Package Command",e); return }
 		}
 		var artifact,version,build string
 		if profile.ResultContract=="ils-result-v1" {
@@ -1065,7 +1059,7 @@ func (a *App) runBuild(ctx context.Context, cancel context.CancelFunc, j BuildJo
 		if stat,statErr:=os.Stat(push); statErr!=nil || !stat.Mode().IsRegular() { finish("failed","ILS scripts/push.sh 不可用"); return }
 		profileEnv:=append(env,"RELEASE_NOTES="+profile.Notes)
 		fmt.Fprintf(log,"Publish %s version %s build %s\n",filepath.Base(artifact),version,build)
-		if e=runProcess(ctx,source.Path,jobLog,profileEnv,"/bin/bash",push,j.ProjectID,version,build,profile.Platform,artifact,profile.Channel,profile.Architecture,profile.Variant); e!=nil { finish("failed","ILS 发布失败；详情见日志"); return }
+		if e=runProcess(ctx,source.Path,jobLog,profileEnv,"/bin/bash",push,j.ProjectID,version,build,profile.Platform,artifact,profile.Channel,profile.Architecture,profile.Variant); e!=nil { commandFailure("ILS 发布",e); return }
 	}
 	a.buildMu.Lock(); count:=len(a.buildReceipts[j.ID]); a.buildMu.Unlock()
 	if count==0 { finish("failed","构建命令退出成功，但没有收到与本任务关联的发布记录"); return }
