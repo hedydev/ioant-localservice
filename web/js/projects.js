@@ -3,7 +3,7 @@ import {readRoute,writeRoute,projectViews} from './router.js';
 
 let projectsGeneration=0;
 let releaseGeneration=0;
-let lastReleaseError='';
+let lastHistoryError='';
 let renderedProjectsSignature='';
 
 function projectsSignature(projects){
@@ -34,23 +34,39 @@ export async function loadProjectReleases(project=state.project){
  const generation=++releaseGeneration;
  if(!project){
   state.releases=[];
+  state.internalTests=[];
   window.dispatchEvent(new CustomEvent('data-refreshed'));
   return;
  }
- try{
-  const releases=await api('/api/projects/'+encodeURIComponent(project)+'/releases',{timeoutMs:10000});
-  if(generation!==releaseGeneration||project!==state.project)return;
-  state.releases=Array.isArray(releases)?releases:[];
-  lastReleaseError='';
-  window.dispatchEvent(new CustomEvent('data-refreshed'));
- }catch(error){
-  if(generation!==releaseGeneration||project!==state.project)return;
-  console.warn('ILS release refresh deferred:',error);
-  window.dispatchEvent(new CustomEvent('data-refreshed'));
-  if(error.message!==lastReleaseError){
-   lastReleaseError=error.message;
-   notice('项目已切换，但 Release 数据暂时不可用：'+error.message,'error');
-  }
+ const [releaseResult,internalResult]=await Promise.allSettled([
+  api('/api/projects/'+encodeURIComponent(project)+'/releases',{timeoutMs:10000}),
+  api('/api/projects/'+encodeURIComponent(project)+'/internal-test-records',{timeoutMs:10000})
+ ]);
+ if(generation!==releaseGeneration||project!==state.project)return;
+
+ const errors=[];
+ if(releaseResult.status==='fulfilled')state.releases=Array.isArray(releaseResult.value)?releaseResult.value:[];
+ else{
+  state.releases=[];
+  errors.push('Release：'+releaseResult.reason.message);
+  console.warn('ILS release refresh deferred:',releaseResult.reason);
+ }
+ if(internalResult.status==='fulfilled')state.internalTests=Array.isArray(internalResult.value)?internalResult.value:[];
+ else{
+  state.internalTests=[];
+  errors.push('Internal Test：'+internalResult.reason.message);
+  console.warn('ILS Internal Test history refresh deferred:',internalResult.reason);
+ }
+
+ window.dispatchEvent(new CustomEvent('data-refreshed'));
+ const message=errors.join('；');
+ if(!message){
+  lastHistoryError='';
+  return;
+ }
+ if(message!==lastHistoryError){
+  lastHistoryError=message;
+  notice('项目已切换，但部分历史数据暂时不可用：'+message,'error');
  }
 }
 
@@ -64,6 +80,7 @@ export async function selectProject(projectID,{updateRoute=true,replaceRoute=fal
  }
  state.project=projectID;
  state.releases=[];
+ state.internalTests=[];
  updateProjectSelection();
  if(updateRoute)writeRoute(projectID,targetView,{replace:replaceRoute});
  window.dispatchEvent(new CustomEvent('project-changed',{detail:{project:projectID}}));
@@ -92,6 +109,7 @@ export async function refreshData(){
 
  if(previous!==current){
   state.releases=[];
+  state.internalTests=[];
   window.dispatchEvent(new CustomEvent('project-changed',{detail:{project:current}}));
   window.dispatchEvent(new CustomEvent('data-refreshed'));
  }
