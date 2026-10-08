@@ -1,4 +1,4 @@
-import {$,state,api,escapeHTML,notice,needAdmin,channelNames,formatSize,formatDate} from './core.js';
+import {$,state,api,escapeHTML,notice,needAdmin,confirmAction,channelNames,formatSize,formatDate} from './core.js';
 import {refreshData} from './projects.js';
 import {renderReleaseCard} from './release-ui.js';
 import {platformIcons,projectAppIcon} from './platform-ui.js';
@@ -179,11 +179,16 @@ async function deleteReleaseRecord(button){
  const id=button.dataset.deleteRelease||'';
  const release=state.releases.find(item=>item.id===id);
  if(!release)return notice('发布记录已经不存在。','error');
- let message='删除 '+(release.filename||release.version||'这个安装包')+' 以及 ILS 中的发布记录？\n\n此操作不能撤销。';
- if(release.ota?.status==='synced'||release.ota?.public_url||release.ota?.artifact_url||release.ota?.manifest_url){
-  message+='\n\n这个版本已同步到 OTA Gateway。ILS 会先删除公网 IPA / manifest；远端清理失败时不会删除本地记录。';
- }
- if(!confirm(message))return;
+ const remoteOTA=release.ota?.status==='synced'||release.ota?.public_url||release.ota?.artifact_url||release.ota?.manifest_url;
+ const confirmed=await confirmAction({
+  title:'删除已发布安装包？',
+  message:'将删除 '+(release.filename||release.version||'这个安装包')+' 以及 ILS 中的发布记录。',
+  detail:remoteOTA
+   ?'这个版本已同步到 OTA Gateway。ILS 会先删除公网 IPA / manifest；远端清理失败时不会删除本地记录。此操作不能撤销。'
+   :'对应安装包文件和发布记录都会永久删除；关联 Build Job 会保留。此操作不能撤销。',
+  confirmLabel:'删除安装包'
+ });
+ if(!confirmed)return;
  const old=button.textContent;
  button.disabled=true;
  button.textContent='正在删除…';
@@ -191,7 +196,7 @@ async function deleteReleaseRecord(button){
   const result=await api('/api/releases/'+encodeURIComponent(id),{method:'DELETE'});
   await refreshData();
   window.dispatchEvent(new CustomEvent('release-record-deleted',{detail:{releaseID:id}}));
-  notice(result.warning||'安装包和发布记录已删除。',result.warning?'error':'info');
+  notice(result.warning||'安装包和发布记录已删除。',result.warning?'warning':'success');
  }catch(error){
   notice(error.message,'error');
   button.disabled=false;
@@ -204,7 +209,13 @@ async function deleteInternalTestRecord(button){
  const id=button.dataset.deleteHistoryBuild||'';
  const record=state.internalTests.find(item=>item.id===id);
  if(!record)return notice('Internal Test 记录已经不存在。','error');
- if(!confirm('删除 '+(record.filename||'这个 Internal Test 测试包')+'？\n\n对应构建记录、日志和测试包都会删除，此操作不能撤销。'))return;
+ const confirmed=await confirmAction({
+  title:'删除 Internal Test？',
+  message:'将删除 '+(record.filename||'这个 Internal Test 测试包')+'。',
+  detail:'对应构建记录、日志和测试包都会永久删除。此操作不能撤销。',
+  confirmLabel:'删除测试包'
+ });
+ if(!confirmed)return;
  const old=button.textContent;
  button.disabled=true;
  button.textContent='正在删除…';
@@ -212,7 +223,7 @@ async function deleteInternalTestRecord(button){
   await api('/api/builds/'+encodeURIComponent(id),{method:'DELETE'});
   await refreshData();
   window.dispatchEvent(new CustomEvent('build-record-deleted',{detail:{jobID:id}}));
-  notice('Internal Test 构建记录、日志和测试包已删除。');
+  notice('Internal Test 构建记录、日志和测试包已删除。','success');
  }catch(error){
   notice(error.message,'error');
   button.disabled=false;
