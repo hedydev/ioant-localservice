@@ -93,6 +93,64 @@ export function notice(message,kind='info',timeout=4500){
  }
 }
 
+let actionConfirmDialog=null;
+let actionConfirmResolver=null;
+
+function ensureActionConfirmDialog(){
+ if(actionConfirmDialog)return actionConfirmDialog;
+ const dialog=document.createElement('dialog');
+ dialog.className='action-confirm-dialog';
+ dialog.setAttribute('aria-labelledby','action-confirm-title');
+ dialog.setAttribute('aria-describedby','action-confirm-message');
+ dialog.innerHTML='<form method="dialog" class="action-confirm-card">'+
+  '<div class="action-confirm-icon" aria-hidden="true">!</div>'+
+  '<div class="action-confirm-copy">'+
+   '<h2 id="action-confirm-title"></h2>'+
+   '<p id="action-confirm-message"></p>'+
+   '<p class="action-confirm-detail" data-confirm-detail hidden></p>'+
+  '</div>'+
+  '<div class="action-confirm-actions">'+
+   '<button type="submit" value="cancel" class="quiet" data-confirm-cancel>取消</button>'+
+   '<button type="submit" value="confirm" class="danger action-confirm-primary" data-confirm-primary>确认</button>'+
+  '</div>'+
+ '</form>';
+ document.body.appendChild(dialog);
+ dialog.addEventListener('close',()=>{
+  const resolve=actionConfirmResolver;
+  actionConfirmResolver=null;
+  if(resolve)resolve(dialog.returnValue==='confirm');
+ });
+ dialog.addEventListener('click',event=>{
+  if(event.target===dialog)dialog.close('cancel');
+ });
+ actionConfirmDialog=dialog;
+ return dialog;
+}
+
+export function confirmAction({
+ title='确认操作',
+ message='',
+ detail='',
+ confirmLabel='确认',
+ cancelLabel='取消'
+}={}){
+ const dialog=ensureActionConfirmDialog();
+ if(dialog.open)return Promise.resolve(false);
+ dialog.querySelector('#action-confirm-title').textContent=title;
+ dialog.querySelector('#action-confirm-message').textContent=message;
+ const detailElement=dialog.querySelector('[data-confirm-detail]');
+ detailElement.textContent=detail;
+ detailElement.hidden=!detail;
+ dialog.querySelector('[data-confirm-primary]').textContent=confirmLabel;
+ dialog.querySelector('[data-confirm-cancel]').textContent=cancelLabel;
+ dialog.returnValue='cancel';
+ return new Promise(resolve=>{
+  actionConfirmResolver=resolve;
+  dialog.showModal();
+  requestAnimationFrame(()=>dialog.querySelector('[data-confirm-primary]')?.focus());
+ });
+}
+
 export function needAdmin(){
  if(state.admin)return true;
  $('#admin-dialog').showModal();
