@@ -6,7 +6,10 @@ function syncInternalTestUI(){
  root.querySelectorAll('[data-run-profile]').forEach(button=>{
   const profile=buildState.profiles.find(item=>item.id===button.dataset.runProfile);
   if(!profile||profile.platform!=='macos'||profile.lane!=='macos-test')return;
-  button.textContent='构建测试包';
+  // MutationObserver watches childList changes under #release-profiles. Setting
+  // textContent unconditionally would create another mutation every time the
+  // observer runs and can starve the page in an endless microtask loop.
+  if(button.textContent!=='构建测试包')button.textContent='构建测试包';
   const article=button.closest('article.release');
   if(!article||article.querySelector('[data-internal-test-note]'))return;
   const note=document.createElement('div');
