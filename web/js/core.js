@@ -96,7 +96,17 @@ export function notice(message,kind='info',timeout=4500){
 let actionConfirmDialog=null;
 let actionConfirmResolver=null;
 
+function ensureActionConfirmStyles(){
+ if(document.querySelector('link[data-action-confirm-style]'))return;
+ const link=document.createElement('link');
+ link.rel='stylesheet';
+ link.href='/confirm-dialog.css?v=20261008';
+ link.dataset.actionConfirmStyle='1';
+ document.head.appendChild(link);
+}
+
 function ensureActionConfirmDialog(){
+ ensureActionConfirmStyles();
  if(actionConfirmDialog)return actionConfirmDialog;
  const dialog=document.createElement('dialog');
  dialog.className='action-confirm-dialog';
