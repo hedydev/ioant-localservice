@@ -1,5 +1,5 @@
 
-import {$,state,api,escapeHTML,formatDate,notice} from './core.js';
+import {$,state,api,escapeHTML,formatDate,notice,confirmAction} from './core.js';
 import {buildState} from './build-state.js';
 import {platformIcons,targetsForJob,buildAppIcon} from './platform-ui.js';
 import {releaseStatusLabel,testFlightLifecycleView,testFlightLinkSource} from './release-ui.js';
@@ -136,14 +136,17 @@ async function deleteBuildJob(button){
  const jobID=button.dataset.deleteBuildJob||'';
  const releaseCount=Number(button.dataset.releaseCount||0);
  const hasInternalArtifact=button.dataset.hasInternalArtifact==='1';
- let message=hasInternalArtifact
-  ?'删除这个历史构建任务、日志和 Internal Test 测试包？'
-  :'删除这个历史构建任务及日志？';
- if(releaseCount>0){
-  message+='\n\n它关联的 '+releaseCount+' 个正式 Release / 已发布安装包不会被删除。';
- }
- message+='\n\n此操作不能撤销。';
- if(!confirm(message))return;
+ const confirmed=await confirmAction({
+  title:hasInternalArtifact?'删除构建和测试包？':'删除历史构建？',
+  message:hasInternalArtifact
+   ?'这个 Build Job 的构建记录、日志和 Internal Test 测试包都会删除。'
+   :'这个 Build Job 的构建记录和日志都会删除。',
+  detail:releaseCount>0
+   ?'它关联的 '+releaseCount+' 个正式 Release / 已发布安装包不会被删除。此操作不能撤销。'
+   :'此操作不能撤销。',
+  confirmLabel:hasInternalArtifact?'删除构建和测试包':'删除构建记录'
+ });
+ if(!confirmed)return;
  const old=button.textContent;
  button.disabled=true;
  button.textContent='正在删除…';
@@ -153,8 +156,12 @@ async function deleteBuildJob(button){
   buildState.collapsedLogs.delete(jobID);
   buildState.progressByJob.delete(jobID);
   button.closest('[data-build-job-id]')?.remove();
+  if(hasInternalArtifact){
+   state.internalTests=state.internalTests.filter(record=>record.id!==jobID);
+   window.dispatchEvent(new CustomEvent('data-refreshed'));
+  }
   window.dispatchEvent(new CustomEvent('build-record-deleted',{detail:{jobID}}));
-  notice(hasInternalArtifact?'构建记录、日志和 Internal Test 测试包已删除。':'构建记录和日志已删除。');
+  notice(hasInternalArtifact?'构建记录、日志和 Internal Test 测试包已删除。':'构建记录和日志已删除。','success');
   await loadBuildJobs();
  }catch(error){
   notice(error.message,'error');
