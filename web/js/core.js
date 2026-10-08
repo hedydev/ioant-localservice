@@ -1,7 +1,7 @@
 
 export const $=selector=>document.querySelector(selector);
 export const state={
- projects:[],releases:[],project:null,
+ projects:[],releases:[],internalTests:[],project:null,
  platform:'all',channel:'all',variant:'all',
  token:'',admin:false,authEpoch:0,job:null,view:'overview'
 };
