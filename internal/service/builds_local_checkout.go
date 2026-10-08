@@ -419,6 +419,28 @@ func (a *App) runLocalCheckoutBuild(ctx context.Context, cancel context.CancelFu
 			env = append(env, a.appStoreConnectBuildEnv()...)
 		}
 	}
+	if profile != nil && profile.Lane == "ios-testflight" {
+		job.Stage = "preflight"
+		job.StageState = "running"
+		job.Progress = nil
+		job.Message = "正在检查 App Store Connect App 记录"
+		_ = a.writeBuild(job)
+		fmt.Fprintf(log, "ILS TestFlight preflight: verify App Store Connect app for profile %s\n", profile.ID)
+		bundleID, checkErr := a.verifyTestFlightAppRecord(ctx, job.ProjectID, profile.ID, source.Path)
+		if checkErr != nil {
+			job.StageState = "failed"
+			job.Message = checkErr.Error()
+			_ = a.writeBuild(job)
+			fmt.Fprintf(log, "ERROR: %s\n", checkErr.Error())
+			finish("failed", checkErr.Error())
+			return
+		}
+		env = append(env, "ILS_BUNDLE_ID="+bundleID)
+		job.StageState = "succeeded"
+		job.Message = "App Store Connect App 已确认：" + bundleID
+		_ = a.writeBuild(job)
+		fmt.Fprintf(log, "ILS TestFlight preflight succeeded: App Store Connect contains %s\n", bundleID)
+	}
 
 	if profile == nil {
 		job.Stage = "script"
