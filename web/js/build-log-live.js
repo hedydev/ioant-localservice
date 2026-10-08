@@ -12,10 +12,13 @@ function updateHeading(element,data){
  if(!heading)return;
  let meta=heading.querySelector('[data-live-log-meta]');
  if(!meta){
-  meta=document.createElement('span');
-  meta.className='meta';
+  meta=heading.querySelector('.meta');
+  if(!meta){
+   meta=document.createElement('span');
+   meta.className='meta';
+   heading.appendChild(meta);
+  }
   meta.dataset.liveLogMeta='1';
-  heading.appendChild(meta);
  }
  const lines=Number.isFinite(data.tail_lines)?data.tail_lines:300;
  meta.textContent='仅显示最新 '+lines+' 行'+(data.truncated?' · 更早内容已隐藏':'')+' · 不自动滚动';
@@ -25,7 +28,7 @@ function updateHeading(element,data){
   download=document.createElement('button');
   download.type='button';
   download.dataset.downloadBuildLog=element.dataset.buildLogOutput;
-  download.textContent='下载完整日志';
+  download.textContent='下载日志';
   heading.appendChild(download);
  }
 }
@@ -79,7 +82,7 @@ async function downloadFullLog(jobID,button){
   link.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
  }catch(error){
-  console.warn('ILS full log download failed:',error);
+  console.warn('ILS build log download failed:',error);
   button.textContent='下载失败';
   setTimeout(()=>{ button.textContent=oldText; },1500);
   return;
