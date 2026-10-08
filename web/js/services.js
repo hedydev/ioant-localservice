@@ -199,7 +199,7 @@ async function syncGatewayDevices({silent=false}={}){
   const report=await api('/api/ota-gateway/sync-devices',{method:'POST'});
   await loadDevices();
   await refreshOTAGatewayStatus();
-  if(!silent)notice('公网设备同步完成：待处理 '+report.pending+'，新导入 '+report.imported+'，已确认 '+report.acked+(report.failed?'，失败 '+report.failed:'')+'。');
+  if(!silent)notice('公网设备同步完成：待处理 '+(report.pending??0)+'，新导入 '+(report.imported??0)+'，已确认 '+(report.acked??0)+((report.failed??0)?'，失败 '+report.failed:'')+'。');
   return report;
  }catch(error){
   if(!silent)notice(error.message,'error');
@@ -218,7 +218,9 @@ async function syncGatewayArtifacts(){
  try{
   const report=await api('/api/ota-gateway/sync-artifacts',{method:'POST'});
   await refreshData();
-  notice('Ad Hoc OTA 同步完成：成功 '+report.artifacts+(report.failed?'，失败 '+report.failed:'')+'。',report.failed?'error':'info');
+  const artifacts=report.artifacts??0;
+  const failed=report.failed??0;
+  notice('Ad Hoc OTA 同步完成：成功 '+artifacts+(failed?'，失败 '+failed:'')+'。',failed?'error':'success');
  }catch(error){
   notice(error.message,'error');
  }finally{
