@@ -13,6 +13,7 @@ const optionalModules=[
  ['./js/build-source.js','initBuildSource','构建来源'],
  ['./js/build-profiles.js','initBuildProfiles','Release Profile'],
  ['./js/build-jobs.js','initBuildJobs','构建任务'],
+ ['./js/build-log-live.js','initBuildLogLive','实时日志'],
  ['./js/ios.js','initIOS','iOS'],
  ['./js/services.js','initServices','设备与 OTA'],
  ['./js/app-store-connect.js','initAppStoreConnect','App Store Connect'],
