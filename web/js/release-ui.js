@@ -223,7 +223,7 @@ function releaseDetailsView(release){
  return details+'</details>';
 }
 
-export function renderReleaseCard(release,{featured=false,showDetails=false}={}){
+export function renderReleaseCard(release,{featured=false,showDetails=false,allowDelete=false}={}){
  const platformName=release.platform==='ios'?'iOS':release.platform==='macos'?'macOS':release.platform;
  const status=release.delivery==='testflight'?releaseStatusLabel(release):'已发布';
  const tone=release.delivery==='testflight'?releaseStatusTone(release):(release.status||'published');
@@ -234,6 +234,9 @@ export function renderReleaseCard(release,{featured=false,showDetails=false}={})
   releaseDeliveryLabel(release),
   formatDate(release.created_at)
  ].filter(Boolean).join(' · ');
+ const deleteAction=allowDelete&&release.delivery!=='testflight'
+  ?'<div class="download-row release-delete-row"><button type="button" class="danger" data-delete-release="'+escapeHTML(release.id)+'">删除安装包</button><span class="meta">同时删除 ILS 中的发布记录；已同步 OTA 时也会先删除公网副本。</span></div>'
+  :'';
  return '<article class="release release-card'+(featured?' featured':'')+'">'+
   '<div class="release-top">'+
    '<div class="release-identity">'+releaseAppIcon(release,{className:featured?'latest-app-icon':'release-app-icon',title:'App Icon'})+
@@ -249,5 +252,6 @@ export function renderReleaseCard(release,{featured=false,showDetails=false}={})
   (release.delivery==='testflight'?'<p class="release-status-message">'+escapeHTML(release.status_message||releaseInstallNote(release))+'</p>':'')+
   releaseActionsView(release)+
   (showDetails?releaseDetailsView(release):'')+
+  deleteAction+
  '</article>';
 }
