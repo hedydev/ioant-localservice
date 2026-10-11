@@ -55,6 +55,7 @@ func (a *App) HandlerV2() http.Handler {
 	mux.HandleFunc("GET /api/projects/{project}/build-source", a.buildSource)
 	mux.HandleFunc("POST /api/local/select-folder", a.selectFolder)
 	mux.HandleFunc("GET /api/local/apple-signing-teams", a.appleSigningTeams)
+	mux.HandleFunc("GET /api/local/ios-simulators", a.iosSimulators)
 	mux.HandleFunc("POST /api/local/select-app-store-connect-key", a.selectAppStoreConnectKey)
 	mux.HandleFunc("GET /api/app-store-connect/config", a.appStoreConnectConfig)
 	mux.HandleFunc("POST /api/app-store-connect/config", a.appStoreConnectConfig)
