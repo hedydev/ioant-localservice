@@ -52,6 +52,11 @@ function laneFor(job){
  return job.lane||job.result?.lane||job.profile_id||'';
 }
 
+function packageOnlyLane(job){
+ const lane=laneFor(job);
+ return lane==='macos-test'||lane==='ios-simulator';
+}
+
 function buildTypeLabel(value){
  return ({native:'Native',expo:'Expo / React Native','hybrid-web-native':'Hybrid Web-Native',tauri:'Tauri / Rust'})[value]||value||'自定义脚本';
 }
@@ -86,15 +91,19 @@ function internalArtifactName(job){
 }
 
 function internalArtifactAction(job){
- if(laneFor(job)!=='macos-test'||job.status!=='succeeded'||!job.result?.artifact)return '';
+ if(!packageOnlyLane(job)||job.status!=='succeeded'||!job.result?.artifact)return '';
  const name=internalArtifactName(job);
- return '<button type="button" class="build-artifact" data-download-internal-artifact="'+escapeHTML(job.id)+'" data-artifact-name="'+escapeHTML(name)+'">下载 '+escapeHTML(name)+'</button>';
+ const download='<button type="button" class="build-artifact" data-download-internal-artifact="'+escapeHTML(job.id)+'" data-artifact-name="'+escapeHTML(name)+'">下载 '+escapeHTML(name)+'</button>';
+ const install=laneFor(job)==='ios-simulator'
+  ?'<button type="button" class="build-artifact" data-install-simulator="'+escapeHTML(job.id)+'">安装并启动到 Simulator</button>'
+  :'';
+ return '<div class="download-row">'+download+install+'</div>';
 }
 
 function buildDeleteAction(job){
  if(job.status==='running')return '';
  const releaseCount=(job.release_ids||[]).length;
- const internal=laneFor(job)==='macos-test'&&Boolean(job.result?.artifact);
+ const internal=packageOnlyLane(job)&&Boolean(job.result?.artifact);
  const label=internal?'删除构建和测试包':'删除构建记录';
  return '<div class="download-row build-delete-row"><button type="button" class="danger" data-delete-build-job="'+escapeHTML(job.id)+'" data-release-count="'+releaseCount+'" data-has-internal-artifact="'+(internal?'1':'0')+'">'+escapeHTML(label)+'</button></div>';
 }
@@ -124,12 +133,35 @@ async function downloadInternalArtifact(jobID,name,button){
  }catch(error){
   console.warn('ILS internal artifact download failed:',error);
   button.textContent='下载失败';
+  notice(error.message,'error');
   setTimeout(()=>{button.textContent=oldText;},1500);
   return;
  }finally{
   button.disabled=false;
  }
  button.textContent=oldText;
+}
+
+async function installSimulator(jobID,button){
+ const oldText=button.textContent;
+ button.disabled=true;
+ button.textContent='正在安装…';
+ try{
+  const result=await api('/api/builds/'+encodeURIComponent(jobID)+'/simulator-install',{
+   method:'POST',
+   timeoutMs:95000
+  });
+  if(result.warning){
+   notice(result.warning,'warning',7000);
+  }else{
+   notice('已安装并启动到当前 iOS Simulator。','success');
+  }
+ }catch(error){
+  notice(error.message,'error',7000);
+ }finally{
+  button.disabled=false;
+  button.textContent=oldText;
+ }
 }
 
 async function deleteBuildJob(button){
@@ -187,6 +219,7 @@ function stageLabel(job){
   return 'ILS Release 待同步';
  }
  if(job.status==='succeeded'&&laneFor(job)==='macos-test')return '测试包已生成';
+ if(job.status==='succeeded'&&laneFor(job)==='ios-simulator')return 'Simulator 测试包已生成';
  if(job.status==='succeeded')return '发布成功';
  return '失败';
 }
@@ -249,6 +282,9 @@ function resultView(job){
     :'App Store Connect 状态：'+stateText);
   return '<div class="submission-result"><strong>iOS 发布</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(stateText)+'</span><small>'+escapeHTML(detail)+'</small>'+link+'</div>';
  }
+ if(result.lane==='ios-simulator'){
+  return '<div class="submission-result"><strong>iOS Simulator Internal Test</strong><span>'+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</span><small>iphonesimulator · '+escapeHTML(result.bundle_id||'')+' · 不创建 Release</small></div>';
+ }
  return '<div class="meta">结果：'+escapeHTML(result.lane||'artifact')+' · '+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</div>';
 }
 
@@ -280,6 +316,7 @@ function pipelineView(job){
  }
  const lanes={
   'ios-adhoc':['preflight','archive','validate','export','publish','complete'],
+  'ios-simulator':['preflight','build','package','complete'],
   'macos-test':['preflight','build','package','complete'],
   'macos-release':['preflight','build','package','notarize','validate','publish','complete']
  };
@@ -422,6 +459,11 @@ export function initBuildJobs(){
   const artifactButton=event.target.closest('[data-download-internal-artifact]');
   if(artifactButton){
    void downloadInternalArtifact(artifactButton.dataset.downloadInternalArtifact,artifactButton.dataset.artifactName,artifactButton);
+   return;
+  }
+  const simulatorButton=event.target.closest('[data-install-simulator]');
+  if(simulatorButton){
+   void installSimulator(simulatorButton.dataset.installSimulator,simulatorButton);
    return;
   }
   const deleteButton=event.target.closest('[data-delete-build-job]');
