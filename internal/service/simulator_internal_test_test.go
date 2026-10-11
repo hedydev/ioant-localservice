@@ -51,6 +51,47 @@ func TestNormalizeSimulatorReleaseProfileRejectsNonArm64(t *testing.T) {
 	}
 }
 
+func TestSimulatorBuildDeviceRoundTrip(t *testing.T) {
+	data := t.TempDir()
+	a := &App{data: data}
+	jobID := strings.Repeat("b", 32)
+	if err := os.MkdirAll(filepath.Join(data, "builds", jobID), 0700); err != nil {
+		t.Fatal(err)
+	}
+	device := IOSSimulatorDevice{
+		UDID:    "11111111-2222-3333-4444-555555555555",
+		Name:    "iPhone 16 Pro",
+		Runtime: "iOS 26.1",
+	}
+	if err := a.writeSimulatorBuildDevice(jobID, device); err != nil {
+		t.Fatalf("writeSimulatorBuildDevice: %v", err)
+	}
+	got := a.readSimulatorBuildDevice(jobID)
+	if got.DeviceID != device.UDID || got.Name != device.Name || got.Runtime != device.Runtime {
+		t.Fatalf("readSimulatorBuildDevice = %+v, want %+v", got, simulatorProfileDeviceFromResolved(device))
+	}
+}
+
+func TestSimulatorProfileDeviceRoundTrip(t *testing.T) {
+	data := t.TempDir()
+	a := &App{data: data}
+	path := a.simulatorProfileDevicePath("sowhat", "ios-simulator")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	want := SimulatorProfileDevice{
+		DeviceID: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+		Name:     "iPad Pro 13-inch",
+		Runtime:  "iOS 26.1",
+	}
+	if err := atomicJSON(path, want); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.readSimulatorProfileDevice("sowhat", "ios-simulator"); got != want {
+		t.Fatalf("readSimulatorProfileDevice = %+v, want %+v", got, want)
+	}
+}
+
 func TestSimulatorInternalTestRecordsExposeSucceededZip(t *testing.T) {
 	data := t.TempDir()
 	a := &App{data: data}
