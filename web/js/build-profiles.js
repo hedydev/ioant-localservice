@@ -3,6 +3,10 @@ import {$,state,api,escapeHTML,notice,needAdmin,confirmAction} from './core.js';
 import {buildState} from './build-state.js';
 import {startBuild} from './build-actions.js';
 import {platformIcons,targetsForProfile,projectAppIcon} from './platform-ui.js';
+import {
+ simulatorState,loadIOSSimulators,loadProjectSimulatorSelections,
+ simulatorOptions,resetSimulatorState
+} from './ios-simulators.js';
 
 let appleSigningTeams=[];
 
@@ -28,6 +32,18 @@ function ensureSimulatorLaneOption(){
  option.textContent='iOS · Simulator Internal Test';
  const testflight=[...lane.options].find(item=>item.value==='ios-testflight');
  lane.insertBefore(option,testflight||null);
+}
+
+function ensureSimulatorDeviceField(){
+ const form=$('#profile-form');
+ if(form.elements.simulator_device_id)return;
+ const grid=form.querySelector('.form-grid');
+ const label=document.createElement('label');
+ label.id='profile-simulator-device-field';
+ label.hidden=true;
+ label.innerHTML='Simulator 设备<select name="simulator_device_id"></select><span class="meta" id="profile-simulator-device-help">从这台 Mac 已安装的 iOS Simulator 设备中选择。</span>';
+ const before=form.elements.result_contract?.closest('label')||null;
+ grid.insertBefore(label,before);
 }
 
 function teamLabel(team){
@@ -77,6 +93,14 @@ async function loadAppleSigningTeams(selected=''){
  }
 }
 
+function simulatorProfileTarget(profile){
+ const configured=simulatorState.profileDevices[profile.id]||{};
+ if(configured.device_id){
+  return '目标 Simulator · '+[configured.name,configured.runtime].filter(Boolean).join(' · ');
+ }
+ return '目标 Simulator · 自动选择（优先已启动设备）';
+}
+
 function profileSummary(profile){
  const standard=profile.result_contract==='ils-result-v1';
  const lane=profile.lane||(profile.platform==='ios'?'ios-adhoc':'macos-test');
@@ -88,7 +112,7 @@ function profileSummary(profile){
   ?(lane==='ios-testflight'
     ?'App Store Connect / TestFlight submission'
     :simulator
-     ?'Simulator .app ZIP · package-only · 可直接安装到已启动 Simulator'
+     ?'Simulator .app ZIP · package-only · 构建后可选择设备直接运行'
      :'由 ILS_OUTPUT_DIR/ils-result.json 返回最终产物')
   :'产物：'+profile.artifact;
  const team=!simulator&&profile.apple_team_id?'<br>Apple Team · '+escapeHTML(profile.apple_team_id):'';
@@ -98,7 +122,9 @@ function profileSummary(profile){
    (profile.testflight_create_group?' · 不存在时自动创建':'')+
    (profile.testflight_submit_beta_review?' · 自动提交 Beta Review':'')
   :'';
- const simulatorNote=simulator?'<br>Simulator Internal Test · 不需要 Apple Team / Provisioning / App Store Connect · 不创建 Release':'';
+ const simulatorNote=simulator
+  ?'<br>'+escapeHTML(simulatorProfileTarget(profile))+'<br>Simulator Internal Test · 不需要 Apple Team / Provisioning / App Store Connect · 不创建 Release'
+  :'';
  return platformIcons(targetsForProfile(profile))+(profile.platform==='ios'?'iOS':profile.platform==='macos'?'macOS':escapeHTML(profile.platform))+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+
   '<br>构建类型 · '+escapeHTML(buildTypeLabel(profile.build_type))+' · 单脚本入口'+
   '<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team+testflight+group+simulatorNote;
@@ -143,7 +169,9 @@ export async function loadReleaseProfiles(){
  try{
   const [profiles,teams]=await Promise.all([
    api('/api/projects/'+project+'/release-profiles'),
-   api('/api/local/apple-signing-teams').catch(()=>null)
+   api('/api/local/apple-signing-teams').catch(()=>null),
+   loadIOSSimulators().catch(()=>[]),
+   loadProjectSimulatorSelections(project).catch(()=>null)
   ]);
   if(project!==state.project)return;
   buildState.profiles=profiles;
@@ -157,6 +185,7 @@ export async function loadReleaseProfiles(){
 function syncProfileForm(){
  const form=$('#profile-form');
  ensureSimulatorLaneOption();
+ ensureSimulatorDeviceField();
  const platform=form.elements.platform.value;
  const contract=form.elements.result_contract.value;
  const lane=form.elements.lane;
@@ -171,6 +200,20 @@ function syncProfileForm(){
  form.elements.apple_team_id.disabled=simulator;
  const teamHelp=$('#profile-apple-team-help');
  if(simulator)teamHelp.textContent='iOS Simulator 构建不签名，不需要 Apple Team 或 Provisioning Profile。';
+
+ const simulatorField=$('#profile-simulator-device-field');
+ const simulatorSelect=form.elements.simulator_device_id;
+ simulatorField.hidden=!simulator;
+ simulatorSelect.disabled=!simulator;
+ if(simulator){
+  const selected=simulatorSelect.value||simulatorSelect.dataset.selected||'';
+  simulatorSelect.innerHTML=simulatorOptions(selected,{includeAuto:true});
+  simulatorSelect.value=selected;
+  $('#profile-simulator-device-help').textContent=simulatorState.devices.length
+   ?'构建会记录此设备，并把选择通过 ILS_SIMULATOR_* 传给项目脚本。构建完成后仍可切换到其他 Simulator 直接运行。'
+   :'当前没有读取到可用的 iOS Simulator；请先在 Xcode 安装 Simulator Runtime。';
+ }
+
  $('#profile-testflight-url-field').hidden=!testflight;
  $('#profile-testflight-automation').hidden=!testflight;
  form.elements.testflight_url.disabled=!testflight;
@@ -196,11 +239,11 @@ function syncProfileForm(){
   :(testflight
     ?'单脚本模式：项目脚本完成预检查、构建和 TestFlight 上传，并写入 ILS_OUTPUT_DIR/ils-result.json。'
     :simulator
-     ?'Simulator Internal Test：脚本构建 iphonesimulator .app，打包 ZIP 并写入 ils-result.json；ILS 不创建 Release，可直接安装到当前 Simulator。'
+     ?'Simulator Internal Test：脚本构建 iphonesimulator .app，打包 ZIP 并写入 ils-result.json；ILS 不创建 Release，构建后可在任意可用 Simulator 上直接运行。'
      :'单脚本模式：项目脚本完成项目内部所有构建步骤，写入 ILS_OUTPUT_DIR/ils-result.json，ILS 验证并发布最终产物。');
 }
 
-function openProfile(profile=null){
+async function openProfile(profile=null){
  if(!needAdmin())return;
  if(!buildState.source||buildState.source.configured===false){
   notice('请先关联本地项目目录');
@@ -208,6 +251,7 @@ function openProfile(profile=null){
  }
  ensureBuildTypeField();
  ensureSimulatorLaneOption();
+ ensureSimulatorDeviceField();
  const form=$('#profile-form');
  form.reset();
  form.elements.id.readOnly=Boolean(profile);
@@ -226,33 +270,54 @@ function openProfile(profile=null){
    else form.elements[key].value=value??'';
   }
  }
+ const configuredDevice=profile?simulatorState.profileDevices[profile.id]?.device_id||'':'';
+ form.elements.simulator_device_id.dataset.selected=configuredDevice;
+ form.elements.simulator_device_id.innerHTML=simulatorOptions(configuredDevice,{includeAuto:true});
+ form.elements.simulator_device_id.value=configuredDevice;
  form.elements.apple_team_id.innerHTML='<option value="">正在读取 Apple Team…</option>';
  syncProfileForm();
  $('#delete-profile').hidden=!profile;
  $('#profile-dialog-title').textContent=profile?'编辑 ILS Release Profile':'新建 ILS Release Profile';
  form.querySelector('.form-error').textContent='';
  $('#profile-dialog').showModal();
- loadAppleSigningTeams(selectedTeam);
+ try{
+  await Promise.all([
+   loadAppleSigningTeams(selectedTeam),
+   loadIOSSimulators({force:true}),
+   loadProjectSimulatorSelections(state.project)
+  ]);
+  if(!$('#profile-dialog').open)return;
+  const selected=profile?simulatorState.profileDevices[profile.id]?.device_id||'':'';
+  form.elements.simulator_device_id.dataset.selected=selected;
+  form.elements.simulator_device_id.innerHTML=simulatorOptions(selected,{includeAuto:true});
+  form.elements.simulator_device_id.value=selected;
+  syncProfileForm();
+ }catch(error){
+  form.querySelector('.form-error').textContent=error.message;
+ }
 }
 
 function resetProfiles(){
  buildState.profiles=[];
  $('#release-profiles').innerHTML='';
  $('#profile-form').reset();
+ resetSimulatorState();
 }
 
 export function initBuildProfiles(){
  ensureBuildTypeField();
  ensureSimulatorLaneOption();
- $('#new-release-profile').onclick=()=>openProfile();
+ ensureSimulatorDeviceField();
+ $('#new-release-profile').onclick=()=>void openProfile();
  $('#profile-form [name=platform]').onchange=syncProfileForm;
  $('#profile-form [name=lane]').onchange=syncProfileForm;
  $('#profile-form [name=result_contract]').onchange=syncProfileForm;
  $('#profile-form [name=testflight_group_type]').onchange=syncProfileForm;
+ $('#profile-form [name=simulator_device_id]').onchange=event=>{event.target.dataset.selected=event.target.value;};
 
  $('#release-profiles').onclick=event=>{
   const create=event.target.closest('[data-create-profile]');
-  if(create)return openProfile();
+  if(create){void openProfile();return;}
 
   const run=event.target.closest('[data-run-profile]');
   if(run)return startBuild({profile:run.dataset.runProfile},run);
@@ -260,7 +325,7 @@ export function initBuildProfiles(){
   const edit=event.target.closest('[data-edit-profile]');
   if(edit){
    const profile=buildState.profiles.find(item=>item.id===edit.dataset.editProfile);
-   if(profile)openProfile(profile);
+   if(profile)void openProfile(profile);
   }
  };
 
@@ -270,17 +335,28 @@ export function initBuildProfiles(){
   const button=event.target.querySelector('[type=submit]');
   button.disabled=true;
   const data=Object.fromEntries(new FormData(event.target));
+  const simulatorDeviceID=data.simulator_device_id||'';
+  delete data.simulator_device_id;
   data.testflight_create_group=event.target.elements.testflight_create_group.checked;
   data.testflight_submit_beta_review=event.target.elements.testflight_submit_beta_review.checked;
+  const project=state.project;
   try{
-   await api('/api/projects/'+state.project+'/release-profiles',{
+   await api('/api/projects/'+project+'/release-profiles',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify(data)
    });
+   if(data.platform==='ios'&&data.lane==='ios-simulator'){
+    await api('/api/projects/'+project+'/release-profiles/'+encodeURIComponent(data.id)+'/simulator-device',{
+     method:'POST',
+     headers:{'Content-Type':'application/json'},
+     body:JSON.stringify({device_id:simulatorDeviceID})
+    });
+   }
+   await loadProjectSimulatorSelections(project);
    $('#profile-dialog').close();
    await loadReleaseProfiles();
-   notice('ILS Release Profile 已保存。构建时只运行这一条标准脚本入口。','success');
+   notice(data.lane==='ios-simulator'?'Simulator Profile 和目标设备已保存。':'ILS Release Profile 已保存。构建时只运行这一条标准脚本入口。','success');
   }catch(error){
    event.target.querySelector('.form-error').textContent=error.message;
   }finally{
@@ -321,4 +397,9 @@ export function initBuildProfiles(){
  window.addEventListener('view-changed',event=>{
   if(event.detail.view==='builds'&&state.admin)loadReleaseProfiles();
  });
+ window.addEventListener('ios-simulators-loaded',()=>{
+  renderProfiles();
+  if($('#profile-dialog')?.open)syncProfileForm();
+ });
+ window.addEventListener('simulator-selections-loaded',()=>renderProfiles());
 }
