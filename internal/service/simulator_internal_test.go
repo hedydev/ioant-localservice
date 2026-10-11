@@ -176,6 +176,15 @@ func (a *App) startSimulatorInternalTestBuild(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	preferred := a.readSimulatorProfileDevice(project, profile.ID)
+	deviceCtx, deviceCancel := context.WithTimeout(r.Context(), 12*time.Second)
+	device, err := resolveIOSSimulator(deviceCtx, preferred.DeviceID)
+	deviceCancel()
+	if err != nil {
+		fail(w, http.StatusConflict, err.Error())
+		return
+	}
+
 	buildType := a.readProfileBuildType(project, profile.ID)
 	snapshot := snapshotFromSource(info, buildType)
 	a.refreshProjectIcons(project, info.Path)
@@ -201,6 +210,9 @@ func (a *App) startSimulatorInternalTestBuild(w http.ResponseWriter, r *http.Req
 	if err == nil {
 		err = atomicJSON(a.buildSourceSnapshotPath(job.ID), snapshot)
 	}
+	if err == nil {
+		err = a.writeSimulatorBuildDevice(job.ID, device)
+	}
 	if err != nil {
 		a.buildMu.Unlock()
 		fail(w, http.StatusInternalServerError, "创建 Simulator 构建任务失败")
@@ -212,7 +224,7 @@ func (a *App) startSimulatorInternalTestBuild(w http.ResponseWriter, r *http.Req
 	a.buildReceipts = map[string][]string{job.ID: {}}
 	a.buildMu.Unlock()
 
-	go a.runSimulatorInternalTestBuild(ctx, cancel, job, source, profile, snapshot)
+	go a.runSimulatorInternalTestBuild(ctx, cancel, job, source, profile, snapshot, device)
 	respond(w, http.StatusAccepted, buildJobLocalView{
 		BuildJob: job, Branch: snapshot.Branch, Head: snapshot.Head,
 		Upstream: snapshot.Upstream, Remote: snapshot.Remote,
@@ -220,7 +232,7 @@ func (a *App) startSimulatorInternalTestBuild(w http.ResponseWriter, r *http.Req
 	})
 }
 
-func (a *App) runSimulatorInternalTestBuild(ctx context.Context, cancel context.CancelFunc, job BuildJob, source BuildSource, profile ReleaseProfile, snapshot buildSourceSnapshot) {
+func (a *App) runSimulatorInternalTestBuild(ctx context.Context, cancel context.CancelFunc, job BuildJob, source BuildSource, profile ReleaseProfile, snapshot buildSourceSnapshot, device IOSSimulatorDevice) {
 	defer func() {
 		cancel()
 		a.buildMu.Lock()
@@ -269,8 +281,9 @@ func (a *App) runSimulatorInternalTestBuild(ctx context.Context, cancel context.
 		"ILS_BUILD_TYPE="+snapshot.BuildType,
 		"ILS_PLATFORM=ios", "ILS_CHANNEL="+profile.Channel, "ILS_ARCHITECTURE="+profile.Architecture,
 		"ILS_VARIANT="+profile.Variant, "ILS_LANE=ios-simulator", "ILS_PUBLISH_MODE=artifact-only",
+		"ILS_SIMULATOR_UDID="+device.UDID, "ILS_SIMULATOR_NAME="+device.Name, "ILS_SIMULATOR_RUNTIME="+device.Runtime,
 	)
-	fmt.Fprintf(log, "ILS iOS Simulator Internal Test\nBranch: %s\nHEAD: %s\nDirty: %t\nBuild type: %s\nNo signing team, provisioning profile, App Store Connect upload, or Release record is required.\n", snapshot.Branch, snapshot.Head, snapshot.Dirty, snapshot.BuildType)
+	fmt.Fprintf(log, "ILS iOS Simulator Internal Test\nBranch: %s\nHEAD: %s\nDirty: %t\nBuild type: %s\nSimulator: %s · %s · %s\nNo signing team, provisioning profile, App Store Connect upload, or Release record is required.\n", snapshot.Branch, snapshot.Head, snapshot.Dirty, snapshot.BuildType, device.Name, device.Runtime, device.UDID)
 
 	var progressMu sync.Mutex
 	jobLog := &eventLog{dst: log, secret: a.token, onEvent: func(event BuildEvent) {
@@ -285,6 +298,7 @@ func (a *App) runSimulatorInternalTestBuild(ctx context.Context, cancel context.
 
 	job.Stage = "build"
 	job.StageState = "running"
+	job.Message = "正在为 " + device.Name + " · " + device.Runtime + " 构建 Simulator 测试包"
 	_ = a.writeBuild(job)
 	fmt.Fprintf(log, "Single entrypoint: %s\n", profile.BuildCommand)
 	if err = runProcess(ctx, source.Path, jobLog, env, "/bin/bash", "-lc", profile.BuildCommand); err != nil {
@@ -325,7 +339,7 @@ func (a *App) runSimulatorInternalTestBuild(ctx context.Context, cancel context.
 	job.Stage = "complete"
 	job.StageState = "succeeded"
 	job.Progress = nil
-	job.Message = "iOS Simulator 测试包已生成，可下载或安装到当前已启动 Simulator"
+	job.Message = "iOS Simulator 测试包已生成，可选择 Simulator 直接运行"
 	finish("succeeded", "")
 }
 
@@ -494,20 +508,41 @@ func (a *App) installSimulatorBuild(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "Simulator 测试包不存在")
 		return
 	}
+
+	var input struct {
+		DeviceID string `json:"simulator_device_id"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+		dec.DisallowUnknownFields()
+		if err = dec.Decode(&input); err != nil {
+			fail(w, http.StatusBadRequest, "Simulator 设备选择无效")
+			return
+		}
+	}
+	requested := strings.TrimSpace(input.DeviceID)
+	if requested == "" {
+		requested = a.readSimulatorBuildDevice(id).DeviceID
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	device, err := resolveIOSSimulator(ctx, requested)
+	if err != nil {
+		fail(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err = bootIOSSimulator(ctx, device); err != nil {
+		fail(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err = a.writeSimulatorBuildDevice(id, device); err != nil {
+		fail(w, http.StatusInternalServerError, "无法保存本次 Simulator 选择")
+		return
+	}
+
 	xcrun, err := exec.LookPath("xcrun")
 	if err != nil {
 		fail(w, http.StatusConflict, "未找到 Xcode xcrun；请先安装并选择 Xcode")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-	defer cancel()
-	if booted, bootErr := exec.CommandContext(ctx, xcrun, "simctl", "getenv", "booted", "HOME").CombinedOutput(); bootErr != nil {
-		detail := shortCommandOutput(booted)
-		if detail != "" {
-			fail(w, http.StatusConflict, "没有可用的已启动 iOS Simulator："+detail)
-		} else {
-			fail(w, http.StatusConflict, "没有可用的已启动 iOS Simulator；请先打开 Simulator 并启动一台设备")
-		}
 		return
 	}
 	temp, err := os.MkdirTemp("", "ils-ios-simulator-*")
@@ -536,18 +571,22 @@ func (a *App) installSimulatorBuild(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "Simulator App Bundle ID 与构建结果不一致")
 		return
 	}
-	_, _ = exec.CommandContext(ctx, xcrun, "simctl", "terminate", "booted", bundleID).CombinedOutput()
-	if installed, installErr := exec.CommandContext(ctx, xcrun, "simctl", "install", "booted", appPath).CombinedOutput(); installErr != nil {
-		fail(w, http.StatusInternalServerError, "安装到 Simulator 失败："+shortCommandOutput(installed))
+	_, _ = exec.CommandContext(ctx, xcrun, "simctl", "terminate", device.UDID, bundleID).CombinedOutput()
+	if installed, installErr := exec.CommandContext(ctx, xcrun, "simctl", "install", device.UDID, appPath).CombinedOutput(); installErr != nil {
+		fail(w, http.StatusInternalServerError, "安装到 "+device.Name+" 失败："+shortCommandOutput(installed))
 		return
 	}
-	launched, launchErr := exec.CommandContext(ctx, xcrun, "simctl", "launch", "booted", bundleID).CombinedOutput()
+	launched, launchErr := exec.CommandContext(ctx, xcrun, "simctl", "launch", device.UDID, bundleID).CombinedOutput()
 	if launchErr != nil {
 		respond(w, http.StatusOK, map[string]any{
 			"installed": true, "launched": false, "bundle_id": bundleID,
-			"warning": "测试包已安装，但自动启动失败：" + shortCommandOutput(launched),
+			"simulator_device_id": device.UDID, "simulator_name": device.Name, "simulator_runtime": device.Runtime,
+			"warning": "测试包已安装到 " + device.Name + "，但自动启动失败：" + shortCommandOutput(launched),
 		})
 		return
 	}
-	respond(w, http.StatusOK, map[string]any{"installed": true, "launched": true, "bundle_id": bundleID})
+	respond(w, http.StatusOK, map[string]any{
+		"installed": true, "launched": true, "bundle_id": bundleID,
+		"simulator_device_id": device.UDID, "simulator_name": device.Name, "simulator_runtime": device.Runtime,
+	})
 }
