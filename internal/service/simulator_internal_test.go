@@ -22,15 +22,16 @@ func normalizeSimulatorReleaseProfile(profile ReleaseProfile) (ReleaseProfile, e
 	if strings.TrimSpace(profile.Platform) != "ios" || strings.TrimSpace(profile.Lane) != "ios-simulator" {
 		return normalizeReleaseProfile(profile)
 	}
+	if strings.TrimSpace(profile.ResultContract) != "ils-result-v1" {
+		return profile, fmt.Errorf("iOS Simulator Profile 必须使用 ils-result-v1")
+	}
+	profile.AppleTeamID = ""
 	profile.Lane = "ios-adhoc"
 	normalized, err := normalizeReleaseProfile(profile)
 	if err != nil {
 		return normalized, err
 	}
 	normalized.Lane = "ios-simulator"
-	if normalized.ResultContract != "ils-result-v1" {
-		return normalized, fmt.Errorf("iOS Simulator Profile 必须使用 ils-result-v1")
-	}
 	if normalized.Architecture != "arm64" {
 		return normalized, fmt.Errorf("iOS Simulator Profile 当前仅支持 Apple Silicon arm64")
 	}
