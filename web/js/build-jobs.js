@@ -3,12 +3,16 @@ import {$,state,api,escapeHTML,formatDate,notice,confirmAction} from './core.js'
 import {buildState} from './build-state.js';
 import {platformIcons,targetsForJob,buildAppIcon} from './platform-ui.js';
 import {releaseStatusLabel,testFlightLifecycleView,testFlightLinkSource} from './release-ui.js';
+import {
+ simulatorState,loadIOSSimulators,loadProjectSimulatorSelections,
+ simulatorOptions,simulatorDeviceByID
+} from './ios-simulators.js';
 
 function ensureBuildJobsStyles(){
  if(document.querySelector('link[data-build-jobs-style]'))return;
  const link=document.createElement('link');
  link.rel='stylesheet';
- link.href='/build-jobs.css?v=20261007';
+ link.href='/build-jobs.css?v=20261012';
  link.dataset.buildJobsStyle='1';
  document.head.appendChild(link);
 }
@@ -90,13 +94,21 @@ function internalArtifactName(job){
  return parts[parts.length-1]||'Internal-Test';
 }
 
+function simulatorRunControls(job){
+ const saved=simulatorState.buildDevices[job.id]||{};
+ const selected=saved.device_id||'';
+ const disabled=simulatorState.devices.length===0&&!selected;
+ return '<span class="simulator-run-controls">'+
+  '<select data-simulator-device-for="'+escapeHTML(job.id)+'" aria-label="选择 Simulator 设备" '+(disabled?'disabled':'')+'>'+simulatorOptions(selected,{includeAuto:false})+'</select>'+
+  '<button type="button" class="build-artifact" data-install-simulator="'+escapeHTML(job.id)+'" '+(disabled?'disabled':'')+'>运行</button>'+
+ '</span>';
+}
+
 function internalArtifactAction(job){
  if(!packageOnlyLane(job)||job.status!=='succeeded'||!job.result?.artifact)return '';
  const name=internalArtifactName(job);
  const download='<button type="button" class="build-artifact" data-download-internal-artifact="'+escapeHTML(job.id)+'" data-artifact-name="'+escapeHTML(name)+'">下载 '+escapeHTML(name)+'</button>';
- const install=laneFor(job)==='ios-simulator'
-  ?'<button type="button" class="build-artifact" data-install-simulator="'+escapeHTML(job.id)+'">安装并启动到 Simulator</button>'
-  :'';
+ const install=laneFor(job)==='ios-simulator'?simulatorRunControls(job):'';
  return '<div class="download-row">'+download+install+'</div>';
 }
 
@@ -142,24 +154,47 @@ async function downloadInternalArtifact(jobID,name,button){
  button.textContent=oldText;
 }
 
+function rememberPendingSimulator(jobID,deviceID){
+ const device=simulatorDeviceByID(deviceID);
+ if(!device)return;
+ simulatorState.buildDevices[jobID]={device_id:device.udid,name:device.name,runtime:device.runtime};
+}
+
 async function installSimulator(jobID,button){
  const oldText=button.textContent;
+ const article=button.closest('[data-build-job-id]');
+ const select=article?.querySelector('[data-simulator-device-for="'+CSS.escape(jobID)+'"]');
+ const deviceID=select?.value||simulatorState.buildDevices[jobID]?.device_id||'';
+ if(!deviceID){
+  notice('请先选择一台 iOS Simulator。','error');
+  return;
+ }
  button.disabled=true;
- button.textContent='正在安装…';
+ if(select)select.disabled=true;
+ button.textContent='正在运行…';
  try{
   const result=await api('/api/builds/'+encodeURIComponent(jobID)+'/simulator-install',{
    method:'POST',
-   timeoutMs:95000
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({simulator_device_id:deviceID}),
+   timeoutMs:125000
   });
+  simulatorState.buildDevices[jobID]={
+   device_id:result.simulator_device_id||deviceID,
+   name:result.simulator_name||simulatorDeviceByID(deviceID)?.name||'',
+   runtime:result.simulator_runtime||simulatorDeviceByID(deviceID)?.runtime||''
+  };
   if(result.warning){
    notice(result.warning,'warning',7000);
   }else{
-   notice('已安装并启动到当前 iOS Simulator。','success');
+   notice('已在 '+[result.simulator_name,result.simulator_runtime].filter(Boolean).join(' · ')+' 启动。','success');
   }
+  await loadBuildJobs();
  }catch(error){
   notice(error.message,'error',7000);
  }finally{
   button.disabled=false;
+  if(select)select.disabled=false;
   button.textContent=oldText;
  }
 }
@@ -187,6 +222,7 @@ async function deleteBuildJob(button){
   if(buildState.activeLog===jobID)buildState.activeLog=null;
   buildState.collapsedLogs.delete(jobID);
   buildState.progressByJob.delete(jobID);
+  delete simulatorState.buildDevices[jobID];
   button.closest('[data-build-job-id]')?.remove();
   if(hasInternalArtifact){
    state.internalTests=state.internalTests.filter(record=>record.id!==jobID);
@@ -283,7 +319,9 @@ function resultView(job){
   return '<div class="submission-result"><strong>iOS 发布</strong><span>'+escapeHTML(result.version)+' ('+escapeHTML(result.build)+')</span><span>'+escapeHTML(stateText)+'</span><small>'+escapeHTML(detail)+'</small>'+link+'</div>';
  }
  if(result.lane==='ios-simulator'){
-  return '<div class="submission-result"><strong>iOS Simulator Internal Test</strong><span>'+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</span><small>iphonesimulator · '+escapeHTML(result.bundle_id||'')+' · 不创建 Release</small></div>';
+  const target=simulatorState.buildDevices[job.id]||{};
+  const targetText=target.device_id?[target.name,target.runtime].filter(Boolean).join(' · '):'尚未选择运行设备';
+  return '<div class="submission-result"><strong>iOS Simulator Internal Test</strong><span>'+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</span><small>iphonesimulator · '+escapeHTML(result.bundle_id||'')+' · '+escapeHTML(targetText)+' · 不创建 Release</small></div>';
  }
  return '<div class="meta">结果：'+escapeHTML(result.lane||'artifact')+' · '+escapeHTML(result.version||'')+' ('+escapeHTML(result.build||'')+')</div>';
 }
@@ -441,6 +479,16 @@ export async function loadBuildJobs(){
  }
 }
 
+async function refreshSimulatorContext(){
+ if(!state.admin||!state.project)return;
+ const project=state.project;
+ await Promise.all([
+  loadIOSSimulators().catch(()=>[]),
+  loadProjectSimulatorSelections(project).catch(()=>null)
+ ]);
+ if(project===state.project)await loadBuildJobs();
+}
+
 function resetJobs(){
  buildState.activeLog=null;
  buildState.collapsedLogs.clear();
@@ -455,6 +503,11 @@ function resetJobs(){
 export function initBuildJobs(){
  ensureBuildJobsStyles();
  const container=$('#build-jobs');
+ container.onchange=event=>{
+  const select=event.target.closest('[data-simulator-device-for]');
+  if(!select)return;
+  rememberPendingSimulator(select.dataset.simulatorDeviceFor,select.value);
+ };
  container.onclick=event=>{
   const artifactButton=event.target.closest('[data-download-internal-artifact]');
   if(artifactButton){
@@ -493,18 +546,27 @@ export function initBuildJobs(){
   buildState.followLog=false;
   buildState.logLoaded=false;
   buildState.logScrollTop=0;
-  loadBuildJobs();
+  void refreshSimulatorContext();
  });
  window.addEventListener('release-record-deleted',()=>{
   if(state.view==='builds')loadBuildJobs();
  });
- window.addEventListener('project-changed',resetJobs);
+ window.addEventListener('project-changed',()=>{
+  resetJobs();
+  if(state.admin&&state.view==='builds')void refreshSimulatorContext();
+ });
  window.addEventListener('admin-cleared',resetJobs);
  window.addEventListener('admin-loaded',()=>{
-  if(state.view==='builds')loadBuildJobs();
+  if(state.view==='builds')void refreshSimulatorContext();
  });
  window.addEventListener('view-changed',event=>{
-  if(event.detail.view==='builds'&&state.admin)loadBuildJobs();
+  if(event.detail.view==='builds'&&state.admin)void refreshSimulatorContext();
+ });
+ window.addEventListener('ios-simulators-loaded',()=>{
+  if(state.view==='builds')loadBuildJobs();
+ });
+ window.addEventListener('simulator-selections-loaded',()=>{
+  if(state.view==='builds')loadBuildJobs();
  });
  setInterval(()=>{
   if(document.hidden||!state.admin||state.view!=='builds')return;
