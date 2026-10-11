@@ -1,5 +1,5 @@
 
-import {$,state,api,escapeHTML,notice,needAdmin} from './core.js';
+import {$,state,api,escapeHTML,notice,needAdmin,confirmAction} from './core.js';
 import {buildState} from './build-state.js';
 import {startBuild} from './build-actions.js';
 import {platformIcons,targetsForProfile,projectAppIcon} from './platform-ui.js';
@@ -18,6 +18,16 @@ function ensureBuildTypeField(){
  label.innerHTML='构建类型<select name="build_type"><option value="native">Native</option><option value="expo">Expo / React Native</option><option value="hybrid-web-native">Hybrid Web-Native</option><option value="tauri">Tauri / Rust</option></select><span class="meta">仅用于描述构建方式；ILS 始终只调用下面一个标准脚本入口。</span>';
  const before=form.elements.result_contract?.closest('label')||null;
  grid.insertBefore(label,before);
+}
+
+function ensureSimulatorLaneOption(){
+ const lane=$('#profile-form')?.elements?.lane;
+ if(!lane||[...lane.options].some(option=>option.value==='ios-simulator'))return;
+ const option=document.createElement('option');
+ option.value='ios-simulator';
+ option.textContent='iOS · Simulator Internal Test';
+ const testflight=[...lane.options].find(item=>item.value==='ios-testflight');
+ lane.insertBefore(option,testflight||null);
 }
 
 function teamLabel(team){
@@ -49,9 +59,9 @@ async function loadAppleSigningTeams(selected=''){
   if(selected)select.value=selected;
   else if(appleSigningTeams.length===1)select.value=appleSigningTeams[0].id;
 
-  if(appleSigningTeams.length===0)help.textContent='未检测到有效代码签名身份；运行构建时会在预检查阶段给出错误。';
+  if(appleSigningTeams.length===0)help.textContent='未检测到有效代码签名身份；需要签名的 iOS 发布会在预检查阶段给出错误。';
   else if(appleSigningTeams.length===1)help.textContent='已检测到唯一 Apple Team，并自动选择。';
-  else help.textContent='检测到 '+appleSigningTeams.length+' 个 Apple Team；iOS 发布必须明确选择一个。';
+  else help.textContent='检测到 '+appleSigningTeams.length+' 个 Apple Team；Ad Hoc / TestFlight 必须明确选择一个。';
  }catch(error){
   appleSigningTeams=[];
   select.innerHTML='<option value="">自动检测（仅一个 Team 时）</option>';
@@ -70,22 +80,28 @@ async function loadAppleSigningTeams(selected=''){
 function profileSummary(profile){
  const standard=profile.result_contract==='ils-result-v1';
  const lane=profile.lane||(profile.platform==='ios'?'ios-adhoc':'macos-test');
+ const simulator=lane==='ios-simulator';
  const metadata=standard
   ?'标准契约 · '+lane
   :(profile.platform==='ios'?'兼容模式：version/build 自动读取 IPA':'兼容模式 · version: '+profile.version_command+' · build: '+profile.build_number_command);
  const output=standard
-  ?(lane==='ios-testflight'?'App Store Connect / TestFlight submission':'由 ILS_OUTPUT_DIR/ils-result.json 返回最终产物')
+  ?(lane==='ios-testflight'
+    ?'App Store Connect / TestFlight submission'
+    :simulator
+     ?'Simulator .app ZIP · package-only · 可直接安装到已启动 Simulator'
+     :'由 ILS_OUTPUT_DIR/ils-result.json 返回最终产物')
   :'产物：'+profile.artifact;
- const team=profile.apple_team_id?'<br>Apple Team · '+escapeHTML(profile.apple_team_id):'';
+ const team=!simulator&&profile.apple_team_id?'<br>Apple Team · '+escapeHTML(profile.apple_team_id):'';
  const testflight=profile.testflight_url?'<br>TestFlight 邀请链接已配置':'';
  const group=profile.testflight_group_name
   ?'<br>TestFlight Group · '+escapeHTML(profile.testflight_group_name)+' · '+escapeHTML(profile.testflight_group_type||'internal')+
    (profile.testflight_create_group?' · 不存在时自动创建':'')+
    (profile.testflight_submit_beta_review?' · 自动提交 Beta Review':'')
   :'';
+ const simulatorNote=simulator?'<br>Simulator Internal Test · 不需要 Apple Team / Provisioning / App Store Connect · 不创建 Release':'';
  return platformIcons(targetsForProfile(profile))+(profile.platform==='ios'?'iOS':profile.platform==='macos'?'macOS':escapeHTML(profile.platform))+' · '+escapeHTML(profile.architecture)+' · '+escapeHTML(profile.channel)+' · '+escapeHTML(profile.variant)+
   '<br>构建类型 · '+escapeHTML(buildTypeLabel(profile.build_type))+' · 单脚本入口'+
-  '<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team+testflight+group;
+  '<br>'+escapeHTML(metadata)+'<br>'+escapeHTML(output)+team+testflight+group+simulatorNote;
 }
 
 function renderProfiles(){
@@ -99,12 +115,14 @@ function renderProfiles(){
  }
 
  $('#release-profiles').innerHTML=buildState.profiles.map(profile=>{
-  const teamRequired=profile.platform==='ios'&&appleSigningTeams.length>1&&!profile.apple_team_id;
+  const signingLane=profile.platform==='ios'&&profile.lane!=='ios-simulator';
+  const teamRequired=signingLane&&appleSigningTeams.length>1&&!profile.apple_team_id;
   const runBlocked=blocked||teamRequired;
+  const runLabel=profile.lane==='ios-simulator'?'构建 Simulator 测试包':profile.platform==='macos'&&profile.lane==='macos-test'?'构建测试包':'构建并发布';
   return '<article class="release">'+
    '<div class="release-top">'+
     '<div class="profile-title-block">'+projectAppIcon(state.project,profile.platform,{className:'profile-app-icon',title:profile.name})+'<div><strong>'+platformIcons(targetsForProfile(profile))+escapeHTML(profile.name)+'</strong><div class="meta">ILS / '+escapeHTML(profile.id)+'</div></div></div>'+
-    '<div class="profile-actions"><button data-edit-profile="'+escapeHTML(profile.id)+'">编辑</button><button data-run-profile="'+escapeHTML(profile.id)+'" '+(runBlocked?'disabled':'')+'>构建并发布</button></div>'+
+    '<div class="profile-actions"><button data-edit-profile="'+escapeHTML(profile.id)+'">编辑</button><button data-run-profile="'+escapeHTML(profile.id)+'" '+(runBlocked?'disabled':'')+'>'+escapeHTML(runLabel)+'</button></div>'+
    '</div>'+
    '<p class="meta">'+profileSummary(profile)+'</p>'+
    (teamRequired?'<div class="job-message">检测到多个 Apple Signing Team；请先编辑 Profile 并选择 Apple Team。</div>':'')+
@@ -132,12 +150,13 @@ export async function loadReleaseProfiles(){
   if(Array.isArray(teams))appleSigningTeams=teams;
   renderProfiles();
  }catch(error){
-  if(project===state.project)notice(error.message);
+  if(project===state.project)notice(error.message,'error');
  }
 }
 
 function syncProfileForm(){
  const form=$('#profile-form');
+ ensureSimulatorLaneOption();
  const platform=form.elements.platform.value;
  const contract=form.elements.result_contract.value;
  const lane=form.elements.lane;
@@ -146,7 +165,12 @@ function syncProfileForm(){
  const legacy=contract!=='ils-result-v1';
  const multipleTeams=appleSigningTeams.length>1;
  const testflight=lane.value==='ios-testflight';
- form.elements.apple_team_id.required=platform==='ios'&&multipleTeams;
+ const simulator=lane.value==='ios-simulator';
+ const signingLane=platform==='ios'&&!simulator;
+ form.elements.apple_team_id.required=signingLane&&multipleTeams;
+ form.elements.apple_team_id.disabled=simulator;
+ const teamHelp=$('#profile-apple-team-help');
+ if(simulator)teamHelp.textContent='iOS Simulator 构建不签名，不需要 Apple Team 或 Provisioning Profile。';
  $('#profile-testflight-url-field').hidden=!testflight;
  $('#profile-testflight-automation').hidden=!testflight;
  form.elements.testflight_url.disabled=!testflight;
@@ -169,9 +193,11 @@ function syncProfileForm(){
  form.elements.build_number_command.required=legacy&&platform==='macos';
  $('#profile-contract-help').textContent=legacy
   ?'兼容模式：ILS 根据 Artifact Path 发布；macOS 还需要 version/build 命令。'
-  :(lane.value==='ios-testflight'
+  :(testflight
     ?'单脚本模式：项目脚本完成预检查、构建和 TestFlight 上传，并写入 ILS_OUTPUT_DIR/ils-result.json。'
-    :'单脚本模式：项目脚本完成项目内部所有构建步骤，写入 ILS_OUTPUT_DIR/ils-result.json，ILS 验证并发布最终产物。');
+    :simulator
+     ?'Simulator Internal Test：脚本构建 iphonesimulator .app，打包 ZIP 并写入 ils-result.json；ILS 不创建 Release，可直接安装到当前 Simulator。'
+     :'单脚本模式：项目脚本完成项目内部所有构建步骤，写入 ILS_OUTPUT_DIR/ils-result.json，ILS 验证并发布最终产物。');
 }
 
 function openProfile(profile=null){
@@ -181,6 +207,7 @@ function openProfile(profile=null){
   return;
  }
  ensureBuildTypeField();
+ ensureSimulatorLaneOption();
  const form=$('#profile-form');
  form.reset();
  form.elements.id.readOnly=Boolean(profile);
@@ -216,6 +243,7 @@ function resetProfiles(){
 
 export function initBuildProfiles(){
  ensureBuildTypeField();
+ ensureSimulatorLaneOption();
  $('#new-release-profile').onclick=()=>openProfile();
  $('#profile-form [name=platform]').onchange=syncProfileForm;
  $('#profile-form [name=lane]').onchange=syncProfileForm;
@@ -252,7 +280,7 @@ export function initBuildProfiles(){
    });
    $('#profile-dialog').close();
    await loadReleaseProfiles();
-   notice('ILS Release Profile 已保存。构建时只运行这一条标准脚本入口。');
+   notice('ILS Release Profile 已保存。构建时只运行这一条标准脚本入口。','success');
   }catch(error){
    event.target.querySelector('.form-error').textContent=error.message;
   }finally{
@@ -264,12 +292,18 @@ export function initBuildProfiles(){
   const form=$('#profile-form');
   const id=form.elements.id.value;
   if(!id||!form.elements.id.readOnly)return;
-  if(!confirm('删除 ILS Release Profile “'+id+'”？不会修改业务项目仓库。'))return;
+  const confirmed=await confirmAction({
+   title:'删除 Release Profile？',
+   message:'删除 ILS Release Profile “'+id+'”？',
+   detail:'只删除 ILS 本机的 Profile 配置，不会修改业务项目仓库。',
+   confirmLabel:'删除 Profile'
+  });
+  if(!confirmed)return;
   try{
    await api('/api/projects/'+state.project+'/release-profiles/'+encodeURIComponent(id),{method:'DELETE'});
    $('#profile-dialog').close();
    await loadReleaseProfiles();
-   notice('Release Profile 已删除。');
+   notice('Release Profile 已删除。','success');
   }catch(error){
    form.querySelector('.form-error').textContent=error.message;
   }
