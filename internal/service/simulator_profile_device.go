@@ -157,9 +157,29 @@ func (a *App) setSimulatorProfileDevice(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *App) deleteReleaseProfileLocalV2(w http.ResponseWriter, r *http.Request) {
-	project, profileID := r.PathValue("project"), r.PathValue("profile")
-	if slugRE.MatchString(project) && slugRE.MatchString(profileID) {
-		_ = os.Remove(a.simulatorProfileDevicePath(project, profileID))
+	if !a.authorized(w, r) {
+		return
 	}
-	a.deleteReleaseProfileLocal(w, r)
+	project, profileID := r.PathValue("project"), r.PathValue("profile")
+	if !slugRE.MatchString(project) || !slugRE.MatchString(profileID) {
+		fail(w, http.StatusNotFound, "Release Profile 不存在")
+		return
+	}
+	a.buildMu.Lock()
+	defer a.buildMu.Unlock()
+	if a.activeBuild != "" {
+		fail(w, http.StatusConflict, "构建期间不能删除 Release Profile")
+		return
+	}
+	if err := os.Remove(a.releaseProfilePath(project, profileID)); err != nil {
+		if os.IsNotExist(err) {
+			fail(w, http.StatusNotFound, "Release Profile 不存在")
+		} else {
+			fail(w, http.StatusInternalServerError, "删除 Release Profile 失败")
+		}
+		return
+	}
+	_ = os.Remove(a.releaseProfileMetaPath(project, profileID))
+	_ = os.Remove(a.simulatorProfileDevicePath(project, profileID))
+	respond(w, http.StatusOK, map[string]bool{"deleted": true})
 }
