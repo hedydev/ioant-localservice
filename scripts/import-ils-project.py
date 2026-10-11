@@ -120,6 +120,26 @@ def normalized_profile(source: dict, apple_team: str) -> dict:
     return result
 
 
+def validate_ios_simulator_profiles(profiles: list[dict]) -> None:
+    ios_profiles = [profile for profile in profiles if profile.get("platform") == "ios"]
+    if not ios_profiles:
+        return
+
+    simulator_profiles = [profile for profile in ios_profiles if profile.get("lane") == "ios-simulator"]
+    if len(simulator_profiles) != 1:
+        die("projects with an iOS client must declare exactly one ios-simulator profile")
+
+    simulator = simulator_profiles[0]
+    if simulator.get("result_contract") != "ils-result-v1":
+        die("ios-simulator profile must use result_contract ils-result-v1")
+    if simulator.get("architecture") != "arm64":
+        die("ios-simulator profile must use architecture arm64")
+    if simulator.get("apple_team_id"):
+        die("ios-simulator profile must not require or select an Apple Team")
+    if not str(simulator.get("build_command", "")).strip():
+        die("ios-simulator profile must provide a build_command")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Import a repository .ils/project.json into local ILS")
     parser.add_argument("--project-dir", required=True, help="absolute or relative local project checkout")
@@ -155,6 +175,8 @@ def main() -> int:
         die("--apple-team must be a 10-character uppercase Apple Team ID")
 
     prepared_profiles = [normalized_profile(profile, args.apple_team) for profile in profiles]
+    validate_ios_simulator_profiles(prepared_profiles)
+
     print(f"Project: {project_name} ({project_id})")
     print(f"Source:  {project_dir}")
     print(f"Branch:  {branch} (reference only; ILS builds the current checkout)")
