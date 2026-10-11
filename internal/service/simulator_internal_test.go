@@ -387,6 +387,10 @@ func (a *App) listPackageOnlyRecords(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) downloadPackageOnlyArtifact(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("job")
+	if !jobRE.MatchString(id) {
+		fail(w, http.StatusNotFound, "任务不存在")
+		return
+	}
 	raw, err := os.ReadFile(a.buildJobPath(id))
 	if err != nil {
 		a.downloadInternalBuildArtifact(w, r)
