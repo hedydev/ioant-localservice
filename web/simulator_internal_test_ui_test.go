@@ -6,6 +6,22 @@ import (
 )
 
 func TestSimulatorInternalTestUIContract(t *testing.T) {
+	simulatorsRaw, err := Files.ReadFile("js/ios-simulators.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	simulators := string(simulatorsRaw)
+	for _, required := range []string{
+		"/api/local/ios-simulators",
+		"simulator-profile-devices",
+		"simulator-build-devices",
+		"simulatorOptions",
+	} {
+		if !strings.Contains(simulators, required) {
+			t.Fatalf("ios-simulators.js missing device-selection contract %q", required)
+		}
+	}
+
 	profilesRaw, err := Files.ReadFile("js/build-profiles.js")
 	if err != nil {
 		t.Fatal(err)
@@ -17,6 +33,9 @@ func TestSimulatorInternalTestUIContract(t *testing.T) {
 		"Simulator Internal Test",
 		"不需要 Apple Team",
 		"profile.lane!=='ios-simulator'",
+		"simulator_device_id",
+		"Simulator 设备",
+		"/simulator-device",
 	} {
 		if !strings.Contains(profiles, required) {
 			t.Fatalf("build-profiles.js missing Simulator contract %q", required)
@@ -45,9 +64,12 @@ func TestSimulatorInternalTestUIContract(t *testing.T) {
 	jobs := string(jobsRaw)
 	for _, required := range []string{
 		"data-install-simulator",
+		"data-simulator-device-for",
+		"simulator_device_id",
 		"/simulator-install",
 		"'ios-simulator':['preflight','build','package','complete']",
 		"Simulator 测试包已生成",
+		"正在运行",
 	} {
 		if !strings.Contains(jobs, required) {
 			t.Fatalf("build-jobs.js missing Simulator build action %q", required)
@@ -61,9 +83,12 @@ func TestSimulatorInternalTestUIContract(t *testing.T) {
 	releases := string(releasesRaw)
 	for _, required := range []string{
 		"data-history-simulator-install",
+		"data-history-simulator-device",
+		"simulator_device_id",
 		"iOS Simulator",
 		"record.lane==='ios-simulator'",
 		"/simulator-install",
+		"无需重新构建",
 	} {
 		if !strings.Contains(releases, required) {
 			t.Fatalf("releases.js missing Simulator history action %q", required)
