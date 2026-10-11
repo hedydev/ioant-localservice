@@ -11,7 +11,11 @@ func TestProjectBootstrapIsIndependentFromAdminAndOptionalModules(t *testing.T) 
 		t.Fatal(err)
 	}
 	app := string(appRaw)
-	if strings.Contains(app, "await restoreAdminSession()") {
+	// Administrator restoration may be awaited inside finishBootstrap because
+	// finishBootstrap itself is launched without awaiting it. What must never
+	// return is a top-level project bootstrap that blocks initProjects on the
+	// remembered administrator session.
+	if strings.Contains(app, "initCore();\nawait restoreAdminSession()") || strings.Contains(app, "initProjects();\nawait restoreAdminSession()") {
 		t.Fatal("core project bootstrap must not await administrator-session restoration")
 	}
 	for _, forbidden := range []string{
@@ -28,6 +32,7 @@ func TestProjectBootstrapIsIndependentFromAdminAndOptionalModules(t *testing.T) 
 		"initProjects();",
 		"await import(path)",
 		"Promise.all(optionalModules.map(initOptionalModule))",
+		"await restoreAdminSession();",
 		"void finishBootstrap();",
 		"部分功能模块初始化失败",
 	} {
