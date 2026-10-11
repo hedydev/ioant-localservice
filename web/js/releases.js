@@ -2,6 +2,10 @@ import {$,state,api,escapeHTML,notice,needAdmin,confirmAction,channelNames,forma
 import {refreshData} from './projects.js';
 import {renderReleaseCard} from './release-ui.js';
 import {platformIcons,projectAppIcon} from './platform-ui.js';
+import {
+ simulatorState,loadIOSSimulators,loadProjectSimulatorSelections,
+ simulatorOptions,simulatorDeviceByID
+} from './ios-simulators.js';
 
 function recordTime(record){
  const value=Date.parse(record?.created_at||'');
@@ -23,6 +27,16 @@ function internalTestPresentation(record){
   :{platform:'macos',targets:['mac'],label:'macOS',kind:'Internal Test'};
 }
 
+function simulatorHistoryControls(record){
+ const saved=simulatorState.buildDevices[record.id]||{};
+ const selected=saved.device_id||simulatorState.devices[0]?.udid||'';
+ const valid=Boolean(selected&&simulatorDeviceByID(selected));
+ return '<span class="simulator-run-controls">'+
+  '<select data-history-simulator-device="'+escapeHTML(record.id)+'" aria-label="选择 Simulator 设备" '+(!simulatorState.devices.length?'disabled':'')+'>'+simulatorOptions(selected,{includeAuto:false})+'</select>'+
+  '<button type="button" class="download secondary" data-history-simulator-install="'+escapeHTML(record.id)+'" '+(!valid?'disabled':'')+'>运行</button>'+
+ '</span>';
+}
+
 function internalTestCard(record,{featured=false,showDetails=false,allowDelete=false}={}){
  const version=record.version||'Internal Test';
  const presentation=internalTestPresentation(record);
@@ -34,12 +48,12 @@ function internalTestCard(record,{featured=false,showDetails=false,allowDelete=f
   formatDate(record.created_at)
  ].filter(Boolean).join(' · ');
  const download='<button type="button" class="download" data-history-internal-download="'+escapeHTML(record.id)+'" data-artifact-name="'+escapeHTML(record.filename||'Internal-Test')+'">下载 '+escapeHTML((record.filename||'测试包').split('.').pop().toUpperCase())+'</button>';
- const install=record.lane==='ios-simulator'
-  ?'<button type="button" class="download secondary" data-history-simulator-install="'+escapeHTML(record.id)+'">安装并启动到 Simulator</button>'
-  :'';
+ const install=record.lane==='ios-simulator'?simulatorHistoryControls(record):'';
+ const saved=record.lane==='ios-simulator'?(simulatorState.buildDevices[record.id]||{}):{};
+ const target=saved.device_id?'<span class="meta">当前运行设备 · '+escapeHTML([saved.name,saved.runtime].filter(Boolean).join(' · '))+'</span>':'';
  const details=showDetails
   ?'<details><summary>构建信息</summary><p>'+escapeHTML(record.lane==='ios-simulator'
-    ?'iOS Simulator Internal Test 只生成 iphonesimulator 测试包，不需要 Apple Team、Provisioning Profile 或 App Store Connect，也不创建正式 Release。'
+    ?'iOS Simulator Internal Test 只生成 iphonesimulator 测试包，不需要 Apple Team、Provisioning Profile 或 App Store Connect，也不创建正式 Release。构建完成后可以切换到其他 Simulator 直接运行，无需重新构建。'
     :'Internal Test 只生成测试安装包，不创建正式 Release，也不进行公证或正式发布。')+'</p><p>'+escapeHTML(record.filename||'')+'</p></details>'
   :'';
  const deleteAction=allowDelete
@@ -55,8 +69,8 @@ function internalTestCard(record,{featured=false,showDetails=false,allowDelete=f
    '</div>'+
    '<span class="release-status status-available">'+escapeHTML(record.lane==='ios-simulator'?'Simulator 测试包':'测试包')+'</span>'+
   '</div>'+
-  '<p class="release-notes">'+escapeHTML(record.notes||(record.lane==='ios-simulator'?'Simulator Internal Test，可直接安装到当前已启动的 iOS Simulator。':'Internal Test 构建产物，可直接下载测试。'))+'</p>'+
-  '<div class="download-row">'+download+install+'<span class="meta">'+formatSize(record.size||0)+' · '+escapeHTML(record.architecture||'')+' · '+escapeHTML(internalTestVariant(record))+'</span></div>'+
+  '<p class="release-notes">'+escapeHTML(record.notes||(record.lane==='ios-simulator'?'Simulator Internal Test，可从下拉选择任意可用 Simulator 直接运行。':'Internal Test 构建产物，可直接下载测试。'))+'</p>'+
+  '<div class="download-row">'+download+install+'<span class="meta">'+formatSize(record.size||0)+' · '+escapeHTML(record.architecture||'')+' · '+escapeHTML(internalTestVariant(record))+'</span>'+target+'</div>'+
   details+
   deleteAction+
  '</article>';
@@ -187,19 +201,43 @@ async function downloadInternalArtifact(jobID,name,button){
  }
 }
 
+function rememberHistorySimulator(jobID,deviceID){
+ const device=simulatorDeviceByID(deviceID);
+ if(!device)return;
+ simulatorState.buildDevices[jobID]={device_id:device.udid,name:device.name,runtime:device.runtime};
+ renderReleases();
+}
+
 async function installSimulatorArtifact(jobID,button){
  if(!needAdmin())return;
+ const article=button.closest('.release-card');
+ const select=article?.querySelector('[data-history-simulator-device="'+CSS.escape(jobID)+'"]');
+ const deviceID=select?.value||simulatorState.buildDevices[jobID]?.device_id||'';
+ if(!deviceID)return notice('请先选择一台 iOS Simulator。','error');
  const old=button.textContent;
  button.disabled=true;
- button.textContent='正在安装…';
+ if(select)select.disabled=true;
+ button.textContent='正在运行…';
  try{
-  const result=await api('/api/builds/'+encodeURIComponent(jobID)+'/simulator-install',{method:'POST',timeoutMs:95000});
+  const result=await api('/api/builds/'+encodeURIComponent(jobID)+'/simulator-install',{
+   method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({simulator_device_id:deviceID}),
+   timeoutMs:125000
+  });
+  simulatorState.buildDevices[jobID]={
+   device_id:result.simulator_device_id||deviceID,
+   name:result.simulator_name||simulatorDeviceByID(deviceID)?.name||'',
+   runtime:result.simulator_runtime||simulatorDeviceByID(deviceID)?.runtime||''
+  };
   if(result.warning)notice(result.warning,'warning',7000);
-  else notice('已安装并启动到当前 iOS Simulator。','success');
+  else notice('已在 '+[result.simulator_name,result.simulator_runtime].filter(Boolean).join(' · ')+' 启动。','success');
+  renderReleases();
  }catch(error){
   notice(error.message,'error',7000);
  }finally{
   button.disabled=false;
+  if(select)select.disabled=false;
   button.textContent=old;
  }
 }
@@ -251,6 +289,7 @@ async function deleteInternalTestRecord(button){
  button.textContent='正在删除…';
  try{
   await api('/api/builds/'+encodeURIComponent(id),{method:'DELETE'});
+  delete simulatorState.buildDevices[id];
   await refreshData();
   window.dispatchEvent(new CustomEvent('build-record-deleted',{detail:{jobID:id}}));
   notice('Internal Test 构建记录、日志和测试包已删除。','success');
@@ -259,6 +298,16 @@ async function deleteInternalTestRecord(button){
   button.disabled=false;
   button.textContent=old;
  }
+}
+
+async function refreshSimulatorHistoryContext(){
+ if(!state.admin||!state.project)return;
+ const project=state.project;
+ await Promise.all([
+  loadIOSSimulators().catch(()=>[]),
+  loadProjectSimulatorSelections(project).catch(()=>null)
+ ]);
+ if(project===state.project)renderReleases();
 }
 
 async function publishManual(form){
@@ -282,7 +331,12 @@ async function publishManual(form){
 }
 
 export function initReleases(){
- window.addEventListener('data-refreshed',renderReleases);
+ window.addEventListener('data-refreshed',()=>{
+  renderReleases();
+  void refreshSimulatorHistoryContext();
+ });
+ window.addEventListener('ios-simulators-loaded',renderReleases);
+ window.addEventListener('simulator-selections-loaded',renderReleases);
 
  $('#platforms').addEventListener('click',event=>{
   const button=event.target.closest('[data-platform]');
@@ -294,6 +348,14 @@ export function initReleases(){
  $('#channel').onchange=event=>{state.channel=event.target.value;renderReleaseHistory();};
  $('#variant').onchange=event=>{state.variant=event.target.value;renderReleaseHistory();};
  $('#refresh').onclick=()=>refreshData().then(()=>notice('')).catch(error=>notice(error.message));
+
+ const handleSimulatorChange=event=>{
+  const select=event.target.closest('[data-history-simulator-device]');
+  if(!select)return;
+  rememberHistorySimulator(select.dataset.historySimulatorDevice,select.value);
+ };
+ $('#overview-latest').addEventListener('change',handleSimulatorChange);
+ $('#releases').addEventListener('change',handleSimulatorChange);
 
  const handleInternalAction=event=>{
   const download=event.target.closest('[data-history-internal-download]');
@@ -344,4 +406,5 @@ export function initReleases(){
  };
 
  renderReleases();
+ if(state.admin&&state.project)void refreshSimulatorHistoryContext();
 }
