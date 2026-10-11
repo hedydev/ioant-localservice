@@ -16,34 +16,47 @@ function internalTestVariant(record){
  return record.variant||'default';
 }
 
+function internalTestPresentation(record){
+ const simulator=record.platform==='ios'||record.lane==='ios-simulator';
+ return simulator
+  ?{platform:'ios',targets:['iphone','ipad'],label:'iOS Simulator',kind:'Simulator Internal Test'}
+  :{platform:'macos',targets:['mac'],label:'macOS',kind:'Internal Test'};
+}
+
 function internalTestCard(record,{featured=false,showDetails=false,allowDelete=false}={}){
  const version=record.version||'Internal Test';
+ const presentation=internalTestPresentation(record);
  const meta=[
   record.build?'build '+record.build:'',
   channelNames[internalTestChannel(record)]||internalTestChannel(record),
   internalTestVariant(record),
-  'Internal Test',
+  presentation.kind,
   formatDate(record.created_at)
  ].filter(Boolean).join(' · ');
  const download='<button type="button" class="download" data-history-internal-download="'+escapeHTML(record.id)+'" data-artifact-name="'+escapeHTML(record.filename||'Internal-Test')+'">下载 '+escapeHTML((record.filename||'测试包').split('.').pop().toUpperCase())+'</button>';
+ const install=record.lane==='ios-simulator'
+  ?'<button type="button" class="download secondary" data-history-simulator-install="'+escapeHTML(record.id)+'">安装并启动到 Simulator</button>'
+  :'';
  const details=showDetails
-  ?'<details><summary>构建信息</summary><p>Internal Test 只生成测试安装包，不创建正式 Release，也不进行公证或正式发布。</p><p>'+escapeHTML(record.filename||'')+'</p></details>'
+  ?'<details><summary>构建信息</summary><p>'+escapeHTML(record.lane==='ios-simulator'
+    ?'iOS Simulator Internal Test 只生成 iphonesimulator 测试包，不需要 Apple Team、Provisioning Profile 或 App Store Connect，也不创建正式 Release。'
+    :'Internal Test 只生成测试安装包，不创建正式 Release，也不进行公证或正式发布。')+'</p><p>'+escapeHTML(record.filename||'')+'</p></details>'
   :'';
  const deleteAction=allowDelete
   ?'<div class="download-row release-delete-row"><button type="button" class="danger" data-delete-history-build="'+escapeHTML(record.id)+'">删除测试包</button><span class="meta">同时删除这个 Internal Test 的构建记录、日志和产物。</span></div>'
   :'';
  return '<article class="release release-card'+(featured?' featured':'')+'">'+
   '<div class="release-top">'+
-   '<div class="release-identity">'+projectAppIcon(record.project_id,'macos',{className:featured?'latest-app-icon':'release-app-icon',title:'App Icon'})+
+   '<div class="release-identity">'+projectAppIcon(record.project_id,presentation.platform,{className:featured?'latest-app-icon':'release-app-icon',title:'App Icon'})+
     '<div class="release-heading-copy">'+
-     '<div class="release-title-line"><strong>'+escapeHTML(version)+'</strong><span class="badge">'+platformIcons(['mac'],{className:'compact'})+'macOS</span></div>'+
+     '<div class="release-title-line"><strong>'+escapeHTML(version)+'</strong><span class="badge">'+platformIcons(presentation.targets,{className:'compact'})+escapeHTML(presentation.label)+'</span></div>'+
      '<div class="meta">'+escapeHTML(meta)+'</div>'+
     '</div>'+
    '</div>'+
-   '<span class="release-status status-available">测试包</span>'+
+   '<span class="release-status status-available">'+escapeHTML(record.lane==='ios-simulator'?'Simulator 测试包':'测试包')+'</span>'+
   '</div>'+
-  '<p class="release-notes">'+escapeHTML(record.notes||'Internal Test 构建产物，可直接下载测试。')+'</p>'+
-  '<div class="download-row">'+download+'<span class="meta">'+formatSize(record.size||0)+' · '+escapeHTML(record.architecture||'')+' · '+escapeHTML(internalTestVariant(record))+'</span></div>'+
+  '<p class="release-notes">'+escapeHTML(record.notes||(record.lane==='ios-simulator'?'Simulator Internal Test，可直接安装到当前已启动的 iOS Simulator。':'Internal Test 构建产物，可直接下载测试。'))+'</p>'+
+  '<div class="download-row">'+download+install+'<span class="meta">'+formatSize(record.size||0)+' · '+escapeHTML(record.architecture||'')+' · '+escapeHTML(internalTestVariant(record))+'</span></div>'+
   details+
   deleteAction+
  '</article>';
@@ -86,7 +99,7 @@ function currentDistributions(){
  [...state.internalTests]
   .sort((a,b)=>recordTime(b)-recordTime(a))
   .forEach(record=>{
-   const key='internal-test:macos:'+internalTestVariant(record)+':'+(record.architecture||'');
+   const key='internal-test:'+(record.platform||'macos')+':'+(record.lane||'macos-test')+':'+internalTestVariant(record)+':'+(record.architecture||'');
    if(!latest.has(key))latest.set(key,{kind:'internal-test',value:record,created_at:record.created_at});
   });
  return [...latest.values()].sort((a,b)=>recordTime(b)-recordTime(a));
@@ -174,6 +187,23 @@ async function downloadInternalArtifact(jobID,name,button){
  }
 }
 
+async function installSimulatorArtifact(jobID,button){
+ if(!needAdmin())return;
+ const old=button.textContent;
+ button.disabled=true;
+ button.textContent='正在安装…';
+ try{
+  const result=await api('/api/builds/'+encodeURIComponent(jobID)+'/simulator-install',{method:'POST',timeoutMs:95000});
+  if(result.warning)notice(result.warning,'warning',7000);
+  else notice('已安装并启动到当前 iOS Simulator。','success');
+ }catch(error){
+  notice(error.message,'error',7000);
+ }finally{
+  button.disabled=false;
+  button.textContent=old;
+ }
+}
+
 async function deleteReleaseRecord(button){
  if(!needAdmin())return;
  const id=button.dataset.deleteRelease||'';
@@ -242,7 +272,7 @@ async function publishManual(form){
   form.closest('dialog').close();
   form.reset();
   await refreshData();
-  notice('发布完成。');
+  notice('发布完成。','success');
  }catch(error){
   form.querySelector('.form-error').textContent=error.message;
  }finally{
@@ -265,15 +295,22 @@ export function initReleases(){
  $('#variant').onchange=event=>{state.variant=event.target.value;renderReleaseHistory();};
  $('#refresh').onclick=()=>refreshData().then(()=>notice('')).catch(error=>notice(error.message));
 
- const handleInternalDownload=event=>{
-  const button=event.target.closest('[data-history-internal-download]');
-  if(!button)return false;
-  void downloadInternalArtifact(button.dataset.historyInternalDownload,button.dataset.artifactName,button);
-  return true;
+ const handleInternalAction=event=>{
+  const download=event.target.closest('[data-history-internal-download]');
+  if(download){
+   void downloadInternalArtifact(download.dataset.historyInternalDownload,download.dataset.artifactName,download);
+   return true;
+  }
+  const install=event.target.closest('[data-history-simulator-install]');
+  if(install){
+   void installSimulatorArtifact(install.dataset.historySimulatorInstall,install);
+   return true;
+  }
+  return false;
  };
- $('#overview-latest').addEventListener('click',handleInternalDownload);
+ $('#overview-latest').addEventListener('click',handleInternalAction);
  $('#releases').addEventListener('click',event=>{
-  if(handleInternalDownload(event))return;
+  if(handleInternalAction(event))return;
   const releaseDelete=event.target.closest('[data-delete-release]');
   if(releaseDelete){
    void deleteReleaseRecord(releaseDelete);
