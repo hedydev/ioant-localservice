@@ -66,6 +66,7 @@ func (a *App) HandlerV2() http.Handler {
 	mux.HandleFunc("GET /api/projects/{project}/release-profiles", a.releaseProfilesLocalV2)
 	mux.HandleFunc("POST /api/projects/{project}/release-profiles", a.releaseProfilesLocalV2)
 	mux.HandleFunc("GET /api/projects/{project}/simulator-profile-devices", a.simulatorProfileDevices)
+	mux.HandleFunc("GET /api/projects/{project}/simulator-build-devices", a.simulatorBuildDevices)
 	mux.HandleFunc("POST /api/projects/{project}/release-profiles/{profile}/simulator-device", a.setSimulatorProfileDevice)
 	mux.HandleFunc("DELETE /api/projects/{project}/release-profiles/{profile}", a.deleteReleaseProfileLocalV2)
 	mux.HandleFunc("POST /api/projects/{project}/builds", a.startLocalCheckoutBuild)
