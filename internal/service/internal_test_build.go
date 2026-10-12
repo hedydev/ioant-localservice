@@ -156,6 +156,9 @@ func (a *App) runInternalTestBuild(ctx context.Context, cancel context.CancelFun
 		"ILS_PLATFORM="+profile.Platform, "ILS_CHANNEL="+profile.Channel, "ILS_ARCHITECTURE="+profile.Architecture,
 		"ILS_VARIANT="+profile.Variant, "ILS_LANE="+profile.Lane, "ILS_PUBLISH_MODE=artifact-only",
 	)
+	if profile.AppleTeamID != "" {
+		env = append(env, "ILS_APPLE_TEAM_ID="+profile.AppleTeamID)
+	}
 	fmt.Fprintf(log, "ILS Internal Test package-only build\nBranch: %s\nHEAD: %s\nDirty: %t\nBuild type: %s\nNo Release record will be created. No notarization or deep bundle validation is performed by ILS.\n", snapshot.Branch, snapshot.Head, snapshot.Dirty, snapshot.BuildType)
 
 	var progressMu sync.Mutex
