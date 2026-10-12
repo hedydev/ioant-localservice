@@ -20,7 +20,7 @@ type projectProfileManifest struct {
 	Profiles      []json.RawMessage `json:"profiles"`
 }
 
-func simulatorProfileFromProjectManifest(raw []byte, project string) (*releaseProfileLocal, error) {
+func profilesFromProjectManifest(raw []byte, project string) ([]releaseProfileLocal, error) {
 	var manifest projectProfileManifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return nil, fmt.Errorf("项目 .ils/project.json 格式无效")
@@ -32,44 +32,68 @@ func simulatorProfileFromProjectManifest(raw []byte, project string) (*releasePr
 		return nil, fmt.Errorf("项目 .ils/project.json id=%q 与 ILS 项目 %q 不一致", manifest.ID, project)
 	}
 
-	var found *releaseProfileLocal
+	out := make([]releaseProfileLocal, 0, len(manifest.Profiles))
+	seen := map[string]bool{}
+	simulatorCount := 0
 	for _, item := range manifest.Profiles {
-		var probe struct {
-			Platform string `json:"platform"`
-			Lane     string `json:"lane"`
-		}
-		if err := json.Unmarshal(item, &probe); err != nil {
-			return nil, fmt.Errorf("项目 .ils/project.json 包含无效 Profile")
-		}
-		if strings.TrimSpace(probe.Platform) != "ios" || strings.TrimSpace(probe.Lane) != "ios-simulator" {
-			continue
-		}
-		if found != nil {
-			return nil, fmt.Errorf("iOS 项目只能声明一个 ios-simulator Profile")
-		}
 		var declared projectManifestProfile
 		if err := json.Unmarshal(item, &declared); err != nil {
-			return nil, fmt.Errorf("ios-simulator Profile 格式无效")
+			return nil, fmt.Errorf("项目 .ils/project.json 包含无效 Profile")
 		}
-		profile, err := normalizeSimulatorReleaseProfile(declared.ReleaseProfile)
+
+		var (
+			profile ReleaseProfile
+			err     error
+		)
+		if strings.TrimSpace(declared.Platform) == "ios" && strings.TrimSpace(declared.Lane) == "ios-simulator" {
+			simulatorCount++
+			if simulatorCount > 1 {
+				return nil, fmt.Errorf("iOS 项目只能声明一个 ios-simulator Profile")
+			}
+			profile, err = normalizeSimulatorReleaseProfile(declared.ReleaseProfile)
+		} else {
+			profile, err = normalizeReleaseProfile(declared.ReleaseProfile)
+		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Profile %q 无效：%w", declared.ID, err)
 		}
+		if seen[profile.ID] {
+			return nil, fmt.Errorf("项目 .ils/project.json 重复声明 Profile %q", profile.ID)
+		}
+		seen[profile.ID] = true
+
 		buildType, err := normalizeBuildType(declared.BuildType)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Profile %q 构建类型无效：%w", profile.ID, err)
 		}
-		found = &releaseProfileLocal{ReleaseProfile: profile, BuildType: buildType}
+		out = append(out, releaseProfileLocal{ReleaseProfile: profile, BuildType: buildType})
 	}
-	return found, nil
+	return out, nil
 }
 
-// syncSimulatorProfileFromProjectManifest fills the machine-local ILS profile
-// store from the current checkout when an iOS project declares a Simulator
-// profile but that profile has not been imported yet. Existing local profiles
-// are deliberately left untouched so Apple Team/TestFlight settings and manual
-// profile edits are never overwritten by a page refresh.
-func (a *App) syncSimulatorProfileFromProjectManifest(project string) error {
+// Kept as a focused helper for Simulator-specific tests and callers. The
+// profile API now synchronizes every missing repository-owned profile, not just
+// the Simulator lane.
+func simulatorProfileFromProjectManifest(raw []byte, project string) (*releaseProfileLocal, error) {
+	profiles, err := profilesFromProjectManifest(raw, project)
+	if err != nil {
+		return nil, err
+	}
+	for i := range profiles {
+		if profiles[i].Platform == "ios" && profiles[i].Lane == "ios-simulator" {
+			profile := profiles[i]
+			return &profile, nil
+		}
+	}
+	return nil, nil
+}
+
+// syncProfilesFromProjectManifest fills the machine-local ILS profile store
+// from the current checkout. Only profiles that do not already exist locally
+// are added. Existing local profiles are deliberately left untouched so Apple
+// Team, TestFlight automation and other machine-local edits are never
+// overwritten just by opening the Build page.
+func (a *App) syncProfilesFromProjectManifest(project string) error {
 	source, err := a.readSource(project)
 	if err != nil {
 		return nil
@@ -81,19 +105,12 @@ func (a *App) syncSimulatorProfileFromProjectManifest(project string) error {
 		}
 		return fmt.Errorf("读取项目 .ils/project.json 失败: %w", err)
 	}
-	declared, err := simulatorProfileFromProjectManifest(raw, project)
+	declared, err := profilesFromProjectManifest(raw, project)
 	if err != nil {
 		return err
 	}
-	if declared == nil {
+	if len(declared) == 0 {
 		return nil
-	}
-
-	profilePath := a.releaseProfilePath(project, declared.ID)
-	if _, err = os.Stat(profilePath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
 	}
 
 	a.buildMu.Lock()
@@ -103,34 +120,45 @@ func (a *App) syncSimulatorProfileFromProjectManifest(project string) error {
 		// profile refresh after the build finishes will perform the sync.
 		return nil
 	}
-	if _, err = os.Stat(profilePath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
+
+	for _, item := range declared {
+		profilePath := a.releaseProfilePath(project, item.ID)
+		if _, statErr := os.Stat(profilePath); statErr == nil {
+			continue
+		} else if !os.IsNotExist(statErr) {
+			return statErr
+		}
+		if err = os.MkdirAll(filepath.Dir(profilePath), 0700); err != nil {
+			return err
+		}
+		if err = atomicJSON(profilePath, item.ReleaseProfile); err != nil {
+			return err
+		}
+		metaPath := a.releaseProfileMetaPath(project, item.ID)
+		if err = os.MkdirAll(filepath.Dir(metaPath), 0700); err != nil {
+			return err
+		}
+		if err = atomicJSON(metaPath, map[string]string{"build_type": item.BuildType}); err != nil {
+			return err
+		}
 	}
-	if err = os.MkdirAll(filepath.Dir(profilePath), 0700); err != nil {
-		return err
-	}
-	if err = atomicJSON(profilePath, declared.ReleaseProfile); err != nil {
-		return err
-	}
-	metaPath := a.releaseProfileMetaPath(project, declared.ID)
-	if err = os.MkdirAll(filepath.Dir(metaPath), 0700); err != nil {
-		return err
-	}
-	return atomicJSON(metaPath, map[string]string{"build_type": declared.BuildType})
+	return nil
 }
 
-// releaseProfilesAutoSync keeps the normal profile API semantics but ensures a
-// repository-owned Simulator profile is visible without requiring a separate
-// manual import step after every checkout update.
+// Backward-compatible name for the first iteration of automatic discovery.
+func (a *App) syncSimulatorProfileFromProjectManifest(project string) error {
+	return a.syncProfilesFromProjectManifest(project)
+}
+
+// releaseProfilesAutoSync keeps normal profile API semantics while making all
+// repository-owned profiles visible without a separate manual import step.
 func (a *App) releaseProfilesAutoSync(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		if !a.authorized(w, r) {
 			return
 		}
-		if err := a.syncSimulatorProfileFromProjectManifest(r.PathValue("project")); err != nil {
-			fail(w, http.StatusConflict, "同步项目 Simulator Profile 失败："+err.Error())
+		if err := a.syncProfilesFromProjectManifest(r.PathValue("project")); err != nil {
+			fail(w, http.StatusConflict, "同步项目 Release Profiles 失败："+err.Error())
 			return
 		}
 	}
