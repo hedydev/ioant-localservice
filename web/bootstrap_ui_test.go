@@ -54,12 +54,21 @@ func TestProjectBootstrapIsIndependentFromAdminAndOptionalModules(t *testing.T) 
 	projectFetch := strings.Index(projects, "await api('/api/projects'")
 	render := strings.Index(projects, "renderProjects();")
 	connected := strings.Index(projects, "$('#connection').textContent='服务已连接';")
-	releaseFetch := strings.Index(projects, "await api('/api/projects/'+encodeURIComponent(current)+'/releases'")
-	if projectFetch < 0 || render < 0 || connected < 0 || releaseFetch < 0 {
+	historyLoad := strings.Index(projects, "await loadProjectReleases(current);")
+	if projectFetch < 0 || render < 0 || connected < 0 || historyLoad < 0 {
 		t.Fatal("projects.js bootstrap markers are missing")
 	}
-	if !(projectFetch < render && render < releaseFetch && connected < releaseFetch) {
-		t.Fatal("project list and connection state must render before Release loading")
+	if !(projectFetch < render && render < historyLoad && connected < historyLoad) {
+		t.Fatal("project list and connection state must render before Release/Internal Test history loading")
+	}
+	for _, required := range []string{
+		"Promise.allSettled([",
+		"api('/api/projects/'+encodeURIComponent(project)+'/releases'",
+		"api('/api/projects/'+encodeURIComponent(project)+'/internal-test-records'",
+	} {
+		if !strings.Contains(projects, required) {
+			t.Fatalf("projects.js missing fault-isolated history loader %q", required)
+		}
 	}
 
 	coreRaw, err := Files.ReadFile("js/core.js")
