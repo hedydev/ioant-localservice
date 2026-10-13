@@ -7,6 +7,7 @@ releaseCardStyles.href='/release-cards.css';
 document.head.appendChild(releaseCardStyles);
 
 const optionalModules=[
+ ['./js/settings.js','initSettings','设置'],
  ['./js/platform-ui.js','initPlatformUI','平台 UI'],
  ['./js/navigation.js','initNavigation','导航'],
  ['./js/releases.js','initReleases','Release'],
