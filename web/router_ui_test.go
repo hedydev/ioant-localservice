@@ -13,7 +13,8 @@ func TestProjectAwareSPARouting(t *testing.T) {
 	router := string(routerRaw)
 	for _, required := range []string{
 		"#/projects/",
-		"#/services",
+		"export const globalViews=new Set(['services','settings'])",
+		"if(globalViews.has(view))return '#/'+view;",
 		"export function readRoute()",
 		"export function writeRoute(",
 	} {
@@ -38,11 +39,14 @@ func TestProjectAwareSPARouting(t *testing.T) {
 		}
 	}
 	clickStart := strings.Index(projects, "$('#projects').addEventListener('click'")
-	clickEnd := strings.Index(projects[clickStart:], "$('#new-project').onclick")
-	if clickStart < 0 || clickEnd < 0 {
+	if clickStart < 0 {
 		t.Fatal("project click handler not found")
 	}
-	clickHandler := projects[clickStart : clickStart+clickEnd]
+	clickEndOffset := strings.Index(projects[clickStart:], "$('#new-project').onclick")
+	if clickEndOffset < 0 {
+		t.Fatal("project click handler end marker not found")
+	}
+	clickHandler := projects[clickStart : clickStart+clickEndOffset]
 	if strings.Contains(clickHandler, "refreshData()") || strings.Contains(clickHandler, "innerHTML=") {
 		t.Fatal("project switching must not refetch the project list or rebuild the sidebar")
 	}
@@ -57,6 +61,7 @@ func TestProjectAwareSPARouting(t *testing.T) {
 		"selectProject(route.project,{updateRoute:false})",
 		"window.addEventListener('hashchange'",
 		"adminDenied&&!adminResolved",
+		"globalViews.has(view)",
 	} {
 		if !strings.Contains(navigation, required) {
 			t.Fatalf("navigation.js missing route behavior %q", required)
