@@ -13,7 +13,7 @@ func TestSettingsThemeIntegration(t *testing.T) {
 	app := string(appRaw)
 	for _, required := range []string{
 		"localStorage.getItem('ils.theme')",
-		"theme.css?v=20261013",
+		"theme.css?v=20261014-contrast",
 		"./js/settings.js",
 		"initSettings",
 	} {
@@ -46,6 +46,7 @@ func TestSettingsThemeIntegration(t *testing.T) {
 		"data-theme-choice=\"light\"",
 		"data-theme-choice=\"dark\"",
 		"localStorage.setItem(THEME_KEY,value)",
+		"theme.css?v=20261014-contrast",
 		"activateView('settings')",
 		"已切换为深色主题",
 	} {
@@ -65,9 +66,17 @@ func TestSettingsThemeIntegration(t *testing.T) {
 		`.theme-choice-grid`,
 		`:root[data-theme="dark"] dialog`,
 		`:root[data-theme="dark"] .build-job`,
+		`:root[data-theme="dark"] .persistent-config-grid>span`,
+		`:root[data-theme="dark"] .persistent-config-grid strong`,
+		`:root[data-theme="dark"] .asc-status-grid>span`,
+		`:root[data-theme="dark"] .testflight-automation`,
+		`:root[data-theme="dark"] .release-lifecycle-step`,
+		`:root[data-theme="dark"] .testflight-state-item`,
+		`:root[data-theme="dark"] .config-warning`,
+		`:root[data-theme="dark"] .build-log-output`,
 	} {
 		if !strings.Contains(theme, required) {
-			t.Fatalf("theme.css missing theme presentation %q", required)
+			t.Fatalf("theme.css missing dark-theme contrast coverage %q", required)
 		}
 	}
 }
