@@ -1,9 +1,11 @@
 export const projectViews=new Set(['overview','builds','releases','ios','automation']);
-export const validViews=new Set(['services',...projectViews]);
+export const globalViews=new Set(['services','settings']);
+export const validViews=new Set([...globalViews,...projectViews]);
 
 export function readRoute(){
  const raw=location.hash.replace(/^#/,'');
- if(raw==='services'||raw==='/services')return {kind:'global',project:null,view:'services',legacy:false};
+ const global=raw.replace(/^\//,'');
+ if(globalViews.has(global))return {kind:'global',project:null,view:global,legacy:false};
  const match=raw.match(/^\/?projects\/([^/]+)\/([^/]+)$/);
  if(match){
   let project='';
@@ -15,15 +17,15 @@ export function readRoute(){
  }
  const legacy=raw.replace(/^\//,'');
  if(validViews.has(legacy)){
-  return legacy==='services'
-   ?{kind:'global',project:null,view:'services',legacy:true}
+  return globalViews.has(legacy)
+   ?{kind:'global',project:null,view:legacy,legacy:true}
    :{kind:'project',project:null,view:legacy,legacy:true};
  }
  return {kind:'project',project:null,view:'overview',legacy:true};
 }
 
 export function routeHash(project,view){
- if(view==='services')return '#/services';
+ if(globalViews.has(view))return '#/'+view;
  const safeView=projectViews.has(view)?view:'overview';
  if(!project)return '#'+safeView;
  return '#/projects/'+encodeURIComponent(project)+'/'+encodeURIComponent(safeView);
