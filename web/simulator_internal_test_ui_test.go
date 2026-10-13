@@ -76,6 +76,32 @@ func TestSimulatorInternalTestUIContract(t *testing.T) {
 		}
 	}
 
+	runUIRaw, err := Files.ReadFile("js/simulator-run-ui.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runUI := string(runUIRaw)
+	for _, required := range []string{
+		"data-simulator-device-for",
+		"data-install-simulator",
+		"simulatorDeviceByID",
+		"button.disabled=select.disabled||!valid",
+		"MutationObserver",
+		"原 Simulator 当前不可用",
+	} {
+		if !strings.Contains(runUI, required) {
+			t.Fatalf("simulator-run-ui.js missing stale-device guard %q", required)
+		}
+	}
+
+	appRaw, err := Files.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(appRaw), "./js/simulator-run-ui.js") {
+		t.Fatal("app.js does not initialize Simulator run availability guard")
+	}
+
 	releasesRaw, err := Files.ReadFile("js/releases.js")
 	if err != nil {
 		t.Fatal(err)
