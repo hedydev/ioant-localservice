@@ -1,21 +1,24 @@
 import {$,state} from './core.js';
-import {readRoute,writeRoute,validViews} from './router.js';
+import {readRoute,writeRoute,validViews,globalViews} from './router.js';
 import {selectProject} from './projects.js';
 
 const adminViews=new Set(['services','builds','automation']);
 const labels={overview:'项目概览',builds:'构建与发布',releases:'版本历史',ios:'iOS 发布',automation:'自动化 / API'};
 
+function isGlobalView(view){return globalViews.has(view);}
+
 function updateHeading(){
- if(state.view==='services')return;
+ if(isGlobalView(state.view))return;
  const project=state.projects.find(item=>item.id===state.project);
  $('#project-title').textContent=project?.name||'安装包分发';
  $('#project-subtitle').textContent=project?(project.id+' / '+labels[state.view]):'选择项目后查看构建与发布信息。';
 }
 
 function updateNavigationSelection(){
- const global=state.view==='services';
- $('#global-services-button')?.classList.toggle('active',global);
- if(global)$('#global-services-button')?.setAttribute('aria-current','page');
+ const global=isGlobalView(state.view);
+ const services=state.view==='services';
+ $('#global-services-button')?.classList.toggle('active',services);
+ if(services)$('#global-services-button')?.setAttribute('aria-current','page');
  else $('#global-services-button')?.removeAttribute('aria-current');
 
  document.querySelectorAll('#projects [data-project]').forEach(button=>{
@@ -30,18 +33,23 @@ function updateGlobalNavigationVisibility(){
  const globalNav=$('#global-services-nav');
  const globalLabel=globalNav?.previousElementSibling;
  const projectLabel=$('#projects')?.previousElementSibling;
- const visible=state.admin;
+ const servicesButton=$('#global-services-button');
 
+ // Settings are always available. Device / OTA remains administrator-only.
  [globalLabel,globalNav].forEach(element=>{
   if(!element)return;
-  element.hidden=!visible;
-  element.style.display=visible?'':'none';
+  element.hidden=false;
+  element.style.display='';
  });
- if(projectLabel)projectLabel.style.marginTop=visible?'28px':'0';
+ if(servicesButton){
+  servicesButton.hidden=!state.admin;
+  servicesButton.style.display=state.admin?'':'none';
+ }
+ if(projectLabel)projectLabel.style.marginTop='28px';
 }
 
 function updatePageShell(){
- const global=state.view==='services';
+ const global=isGlobalView(state.view);
  const projectHeading=document.querySelector('main > .page-heading');
  const workspaceTabs=$('#workspace-tabs');
  if(projectHeading){
@@ -70,7 +78,7 @@ export function activateView(requested,{updateRoute=true,replaceRoute=false}={})
  updateNavigationSelection();
 
  if(updateRoute){
-  if(view==='services')writeRoute(null,'services',{replace:replaceRoute});
+  if(isGlobalView(view))writeRoute(null,view,{replace:replaceRoute});
   else if(state.project)writeRoute(state.project,view,{replace:replaceRoute});
  }
  window.dispatchEvent(new CustomEvent('view-changed',{detail:{view}}));
@@ -82,7 +90,7 @@ async function applyRoute({canonicalize=false,adminResolved=false}={}){
  if(route.kind==='project'&&route.project&&route.project!==state.project){
   await selectProject(route.project,{updateRoute:false});
  }
- const requested=route.kind==='global'?'services':route.view;
+ const requested=route.kind==='global'?route.view:route.view;
  const adminDenied=adminViews.has(requested)&&!state.admin;
  const actual=activateView(requested,{updateRoute:false});
 
@@ -93,8 +101,8 @@ async function applyRoute({canonicalize=false,adminResolved=false}={}){
  if(adminDenied&&!adminResolved)return;
 
  if(route.kind==='global'){
-  if(actual==='services'){
-   if(canonicalize||route.legacy)writeRoute(null,'services',{replace:true});
+  if(isGlobalView(actual)){
+   if(canonicalize||route.legacy||route.view!==actual)writeRoute(null,actual,{replace:true});
   }else if(state.project){
    writeRoute(state.project,actual,{replace:true});
   }
