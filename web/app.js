@@ -14,7 +14,7 @@ document.documentElement.style.colorScheme=savedTheme;
 
 const themeStyles=document.createElement('link');
 themeStyles.rel='stylesheet';
-themeStyles.href='/theme.css?v=20261013';
+themeStyles.href='/theme.css?v=20261014-contrast';
 themeStyles.dataset.ilsThemeStyle='1';
 document.head.appendChild(themeStyles);
 
