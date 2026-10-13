@@ -32,7 +32,7 @@ function ensureThemeStyle(){
  if(document.querySelector('link[data-ils-theme-style]'))return;
  const link=document.createElement('link');
  link.rel='stylesheet';
- link.href='/theme.css?v=20261013';
+ link.href='/theme.css?v=20261014-contrast';
  link.dataset.ilsThemeStyle='1';
  document.head.appendChild(link);
 }
