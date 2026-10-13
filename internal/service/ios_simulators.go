@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -156,6 +158,65 @@ func resolveIOSSimulator(ctx context.Context, requested string) (IOSSimulatorDev
 	return devices[0], nil
 }
 
+func selectedXcodeDeveloperDir(ctx context.Context) (string, error) {
+	if value := strings.TrimSpace(os.Getenv("DEVELOPER_DIR")); value != "" {
+		return filepath.Clean(value), nil
+	}
+	output, err := exec.CommandContext(ctx, "/usr/bin/xcode-select", "-p").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("无法读取当前 Xcode Developer 目录：%s", shortCommandOutput(output))
+	}
+	value := strings.TrimSpace(string(output))
+	if value == "" {
+		return "", fmt.Errorf("当前 Xcode Developer 目录为空")
+	}
+	return filepath.Clean(value), nil
+}
+
+func simulatorFrontendPath(developerDir string) (kind, path string) {
+	developerDir = filepath.Clean(developerDir)
+	simulatorPath := filepath.Join(developerDir, "Applications", "Simulator.app")
+	if info, err := os.Stat(simulatorPath); err == nil && info.IsDir() {
+		return "simulator", simulatorPath
+	}
+	deviceHubPath := filepath.Join(filepath.Dir(developerDir), "Applications", "DeviceHub.app")
+	if info, err := os.Stat(deviceHubPath); err == nil && info.IsDir() {
+		return "device-hub", deviceHubPath
+	}
+	return "", ""
+}
+
+func simulatorFrontendOpenArgs(kind, appPath, deviceID string) []string {
+	switch kind {
+	case "simulator":
+		return []string{"-a", appPath, "--args", "-CurrentDeviceUDID", deviceID}
+	case "device-hub":
+		return []string{"-a", appPath, "devices://device/open?id=" + deviceID}
+	default:
+		return nil
+	}
+}
+
+func openIOSSimulatorFrontend(ctx context.Context, device IOSSimulatorDevice) error {
+	developerDir, err := selectedXcodeDeveloperDir(ctx)
+	if err != nil {
+		return err
+	}
+	kind, appPath := simulatorFrontendPath(developerDir)
+	if kind == "" {
+		return fmt.Errorf("当前 Xcode 未找到 Simulator.app 或 DeviceHub.app")
+	}
+	output, err := exec.CommandContext(ctx, "/usr/bin/open", simulatorFrontendOpenArgs(kind, appPath, device.UDID)...).CombinedOutput()
+	if err != nil {
+		label := "Simulator"
+		if kind == "device-hub" {
+			label = "Device Hub"
+		}
+		return fmt.Errorf("打开 %s 失败：%s", label, shortCommandOutput(output))
+	}
+	return nil
+}
+
 func bootIOSSimulator(ctx context.Context, device IOSSimulatorDevice) error {
 	xcrun, err := exec.LookPath("xcrun")
 	if err != nil {
@@ -171,9 +232,9 @@ func bootIOSSimulator(ctx context.Context, device IOSSimulatorDevice) error {
 	if err != nil {
 		return fmt.Errorf("等待 Simulator 启动失败：%s", shortCommandOutput(output))
 	}
-	// Bringing Simulator.app forward is best-effort. simctl remains the source
-	// of truth for install/launch even if the GUI app cannot be activated.
-	_ = exec.Command("/usr/bin/open", "-a", "Simulator").Start()
+	if err = openIOSSimulatorFrontend(ctx, device); err != nil {
+		return err
+	}
 	return nil
 }
 
