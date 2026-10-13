@@ -1,6 +1,23 @@
 import {initCore,restoreAdminSession,notice} from './js/core.js';
 import {initProjects,refreshData} from './js/projects.js';
 
+const savedTheme=(()=>{
+ try{
+  const value=localStorage.getItem('ils.theme');
+  return value==='dark'?'dark':'light';
+ }catch{
+  return 'light';
+ }
+})();
+document.documentElement.dataset.theme=savedTheme;
+document.documentElement.style.colorScheme=savedTheme;
+
+const themeStyles=document.createElement('link');
+themeStyles.rel='stylesheet';
+themeStyles.href='/theme.css?v=20261013';
+themeStyles.dataset.ilsThemeStyle='1';
+document.head.appendChild(themeStyles);
+
 const releaseCardStyles=document.createElement('link');
 releaseCardStyles.rel='stylesheet';
 releaseCardStyles.href='/release-cards.css';
