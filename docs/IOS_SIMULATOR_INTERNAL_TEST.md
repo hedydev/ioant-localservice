@@ -82,6 +82,8 @@ The Build Job records the device selected when the build starts. This gives the 
 
 After a build succeeds, changing the Simulator dropdown does **not** rebuild the app. The same ZIP can be installed and launched on another available Simulator.
 
+If a Build Job remembers a Simulator that is no longer installed or available — for example after an Xcode Simulator Runtime cleanup or upgrade — ILS keeps the stale target visible for context but disables **Run** for that target. Selecting any currently available Simulator immediately enables **Run** again and reuses the existing ZIP; no rebuild is required.
+
 ## Install and launch
 
 For a successful Simulator Build Job, ILS exposes:
