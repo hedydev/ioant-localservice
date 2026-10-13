@@ -33,19 +33,14 @@ function updateGlobalNavigationVisibility(){
  const globalNav=$('#global-services-nav');
  const globalLabel=globalNav?.previousElementSibling;
  const projectLabel=$('#projects')?.previousElementSibling;
- const servicesButton=$('#global-services-button');
+ const visible=state.admin;
 
- // Settings are always available. Device / OTA remains administrator-only.
  [globalLabel,globalNav].forEach(element=>{
   if(!element)return;
-  element.hidden=false;
-  element.style.display='';
+  element.hidden=!visible;
+  element.style.display=visible?'':'none';
  });
- if(servicesButton){
-  servicesButton.hidden=!state.admin;
-  servicesButton.style.display=state.admin?'':'none';
- }
- if(projectLabel)projectLabel.style.marginTop='28px';
+ if(projectLabel)projectLabel.style.marginTop=visible?'28px':'0';
 }
 
 function updatePageShell(){
@@ -90,7 +85,7 @@ async function applyRoute({canonicalize=false,adminResolved=false}={}){
  if(route.kind==='project'&&route.project&&route.project!==state.project){
   await selectProject(route.project,{updateRoute:false});
  }
- const requested=route.kind==='global'?route.view:route.view;
+ const requested=route.view;
  const adminDenied=adminViews.has(requested)&&!state.admin;
  const actual=activateView(requested,{updateRoute:false});
 
