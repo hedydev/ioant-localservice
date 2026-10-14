@@ -296,6 +296,12 @@ func (a *App) runSimulatorInternalTestBuild(ctx context.Context, cancel context.
 		_ = a.writeBuild(job)
 	}}
 
+	env, _, err = preparePortableIOSNodeEnvironment(ctx, source.Path, profile.Platform, snapshot.BuildType, jobLog, env)
+	if err != nil {
+		finish("failed", err.Error())
+		return
+	}
+
 	job.Stage = "build"
 	job.StageState = "running"
 	job.Message = "正在为 " + device.Name + " · " + device.Runtime + " 构建 Simulator 测试包"
