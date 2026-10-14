@@ -61,7 +61,7 @@ func TestRepairNodeBinaryAssignmentPreservesOtherLines(t *testing.T) {
 	if len(assignments) != 1 {
 		t.Fatalf("assignments = %d, want 1", len(assignments))
 	}
-	if err := repairNodeBinaryAssignment(path, assignments[0].Line, "/opt/homebrew/bin/node"); err != nil {
+	if err := repairNodeBinaryAssignment(path, assignments[0].Line); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(path)
@@ -69,7 +69,7 @@ func TestRepairNodeBinaryAssignmentPreservesOtherLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(raw)
-	want := "# local only\nexport NODE_BINARY=\"/opt/homebrew/bin/node\"\nOTHER=value\n"
+	want := "# local only\nexport NODE_BINARY=\"$(command -v node)\"\nOTHER=value\n"
 	if got != want {
 		t.Fatalf("repaired file = %q, want %q", got, want)
 	}
@@ -157,7 +157,7 @@ func TestPreparePortableIOSNodeEnvironmentRepairsIgnoredLocalFile(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "export NODE_BINARY=\""+node+"\"") {
+	if !strings.Contains(string(raw), `export NODE_BINARY="$(command -v node)"`) {
 		t.Fatalf("local env was not repaired: %s", raw)
 	}
 	if !strings.Contains(log.String(), "Auto-repaired ignored local Xcode Node env") {
