@@ -419,6 +419,13 @@ func (a *App) runLocalCheckoutBuild(ctx context.Context, cancel context.CancelFu
 			env = append(env, a.appStoreConnectBuildEnv()...)
 		}
 	}
+	if profile != nil {
+		env, _, err = preparePortableIOSNodeEnvironment(ctx, source.Path, profile.Platform, snapshot.BuildType, jobLog, env)
+		if err != nil {
+			finish("failed", err.Error())
+			return
+		}
+	}
 	if profile != nil && profile.Lane == "ios-testflight" {
 		job.Stage = "preflight"
 		job.StageState = "running"
