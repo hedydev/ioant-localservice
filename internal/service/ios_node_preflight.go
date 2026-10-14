@@ -233,7 +233,7 @@ func gitPathState(ctx context.Context, root, path string) (tracked, ignored bool
 	return tracked, ignored, nil
 }
 
-func repairNodeBinaryAssignment(path string, line int, node string) error {
+func repairNodeBinaryAssignment(path string, line int) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -249,7 +249,7 @@ func repairNodeBinaryAssignment(path string, line int, node string) error {
 	if line < 0 || line >= len(lines) {
 		return fmt.Errorf("NODE_BINARY 行已变化")
 	}
-	lines[line] = "export NODE_BINARY=\"" + strings.ReplaceAll(node, "\"", "\\\"") + "\""
+	lines[line] = `export NODE_BINARY="$(command -v node)"`
 	updated := []byte(strings.Join(lines, "\n"))
 	temp, err := os.CreateTemp(filepath.Dir(path), ".xcode-env-*")
 	if err != nil {
@@ -337,14 +337,14 @@ func preparePortableIOSNodeEnvironment(ctx context.Context, root, platform, buil
 		}
 		canRepair := filepath.Base(path) == ".xcode.env.local" && len(assignments) == 1 && !tracked && ignored
 		if canRepair {
-			if repairErr := repairNodeBinaryAssignment(path, assignment.Line, node); repairErr != nil {
+			if repairErr := repairNodeBinaryAssignment(path, assignment.Line); repairErr != nil {
 				failure := fmt.Errorf("Expo / React Native iOS preflight: 自动修复 %s 失败：%v", display, repairErr)
 				emitBuildEvent(log, BuildEvent{Stage: "preflight", State: "failed", Message: failure.Error()})
 				fmt.Fprintf(log, "ERROR: %s\n", failure.Error())
 				return env, report, failure
 			}
 			report.Repaired = append(report.Repaired, display)
-			fmt.Fprintf(log, "Auto-repaired ignored local Xcode Node env: %s\nOld NODE_BINARY: %s\nNew NODE_BINARY: %s\n", display, assignment.Value, node)
+			fmt.Fprintf(log, "Auto-repaired ignored local Xcode Node env: %s\nOld NODE_BINARY: %s\nNew NODE_BINARY: $(command -v node) -> %s\n", display, assignment.Value, node)
 			continue
 		}
 
