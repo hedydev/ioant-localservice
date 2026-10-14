@@ -25,7 +25,7 @@ The project script writes its machine-readable outcome to:
 $ILS_OUTPUT_DIR/ils-result.json
 ```
 
-ILS owns Git readiness, task state, local artifact publication, logs and TestFlight submission feedback. The project script owns compile/sign/archive/export/package validation. It must not switch/stash/reset/clean/commit/push Git, install or launch the app, read the ILS administrator token, or call the ILS publication API.
+ILS owns source snapshots, task state, local artifact publication, logs and TestFlight submission feedback. The project script owns compile/sign/archive/export/package validation. It must not switch/stash/reset/clean/commit/push Git, install or launch the app, read the ILS administrator token, or call the ILS publication API.
 
 The reusable cross-project rules live in Hero Skills `standards/apple-release-build-contract.md`.
 
@@ -37,18 +37,22 @@ Profiles are stored under:
 .localservice/release-profiles/<project>/<profile>.json
 ```
 
-Creating, editing, running or deleting a profile does not write configuration into the linked business repository.
+Creating, editing, running or deleting a profile does not rewrite tracked configuration in the linked business repository. For Expo / React Native iOS builds, ILS may repair a stale `ios/.xcode.env.local` only when that file is both untracked and ignored by Git; tracked or visible worktree files are never rewritten automatically.
 
-## Required project state
+## Current local checkout model
 
-Before every build ILS verifies:
+ILS builds the checkout exactly as it exists when the Build Job starts.
 
-- the linked directory is a Git worktree;
-- the current branch matches the configured branch;
-- the worktree is clean;
-- an upstream exists.
+Before every build ILS records:
 
-ILS then runs `git pull --ff-only` with Git hooks and autostash disabled. It does not switch branches, stash, reset, clean, rebase, or resolve conflicts.
+- current branch (or detached state);
+- exact `HEAD`;
+- dirty/clean state;
+- upstream, when configured;
+- remote URL, when configured;
+- Profile build type.
+
+A dirty worktree or non-`main` branch is valid build input. ILS does **not** run `git pull`, switch branches, stash, reset, clean, rebase, commit, or otherwise rewrite source state. The recorded source snapshot is shown with the Build Job so the artifact can be traced back to the exact local checkout that produced it.
 
 ## Profile fields
 
@@ -60,7 +64,7 @@ ILS then runs `git pull --ff-only` with Git hooks and autostash disabled. It doe
 | `architecture` | `arm64`, `x86_64`, or `universal`; iOS must be arm64 |
 | `channel` | `dev`, `beta`, or `stable` |
 | `variant` | Stable package identity |
-| `lane` | `ios-adhoc`, `ios-testflight`, `macos-test`, or `macos-release` |
+| `lane` | `ios-adhoc`, `ios-testflight`, `ios-simulator`, `macos-test`, or `macos-release` |
 | `result_contract` | Preferred: `ils-result-v1`; empty keeps legacy artifact-field behavior |
 | `apple_team_id` | Optional 10-character Apple Team ID. ILS exposes detected local signing teams in the Profile UI and exports the selected value as `ILS_APPLE_TEAM_ID`. Required by the UI when multiple signing teams are detected for an iOS profile. |
 | `testflight_url` | Optional fallback Apple TestFlight invitation URL. Valid only for `ios-testflight`. When App Store Connect exposes an enabled Beta Group public link, that API-derived link takes priority. |
@@ -75,7 +79,9 @@ ILS then runs `git pull --ff-only` with Git hooks and autostash disabled. It doe
 | `build_number_command` | Legacy macOS mode only |
 | `notes` | Default ILS release notes |
 
-TestFlight profiles must use `ils-result-v1`.
+`build_type` is local ILS Profile metadata rather than part of the portable Release Profile JSON. Supported values are `native`, `expo`, `hybrid-web-native`, and `tauri`. The UI label for `expo` is **Expo / React Native**.
+
+TestFlight and Simulator profiles use `ils-result-v1`.
 
 ## Standard execution environment
 
@@ -89,6 +95,11 @@ ILS_PROJECT_ID
 ILS_JOB_ID
 ILS_OUTPUT_DIR
 ILS_GIT_COMMIT
+ILS_GIT_BRANCH
+ILS_GIT_DIRTY
+ILS_GIT_UPSTREAM
+ILS_GIT_REMOTE
+ILS_BUILD_TYPE
 ILS_PLATFORM
 ILS_CHANNEL
 ILS_ARCHITECTURE
@@ -100,7 +111,50 @@ ILS_ASC_KEY_PATH     # TestFlight only, Team API Key local .p8 path
 ILS_ASC_ISSUER_ID    # Team API Key issuer
 ```
 
+For an `expo` + `ios` Profile, after the Node preflight succeeds ILS also exports:
+
+```text
+NODE_BINARY
+ILS_NODE_BINARY
+```
+
+Both point to the Node executable resolved on the current Mac before the project build command starts.
+
 The standard project script must place final release evidence beneath `ILS_OUTPUT_DIR`. Large compiler/package caches may remain in the project's configured development cache.
+
+## Expo / React Native iOS Node preflight
+
+For every Profile with `platform=ios` and `build_type=expo`, including `ios-simulator`, ILS performs a portable Node/Xcode environment check before invoking the project's build command.
+
+The preflight:
+
+1. resolves a currently executable `node` from the Build Job environment, with standard Homebrew locations as a fallback;
+2. executes `node --version` and logs the resolved binary and version;
+3. scans project iOS directories for `.xcode.env` and `.xcode.env.local`, while skipping generated trees such as `node_modules`, `Pods`, `build`, `dist`, and `.git`;
+4. detects literal absolute `NODE_BINARY` assignments that no longer point to an executable file;
+5. exports the current Node as `NODE_BINARY` and `ILS_NODE_BINARY` for the project command.
+
+A stale `.xcode.env.local` is auto-repaired only when all of the following are true:
+
+- it contains one simple literal `NODE_BINARY` assignment;
+- the file is not tracked by Git;
+- the file is ignored by Git.
+
+This covers the common machine-local React Native file left behind after moving a checkout to a different Mac or changing Node managers. The repair preserves the rest of the file and its permissions.
+
+If the stale value is in `.xcode.env`, in a tracked `.xcode.env.local`, or in an unignored local file, ILS stops during `preflight` and reports the exact file, obsolete Node path, and currently resolved Node. It does not rewrite tracked or user-visible source configuration automatically.
+
+Example log evidence:
+
+```text
+ILS iOS Node preflight
+Node: /opt/homebrew/bin/node
+Node version: v22.x.x
+Auto-repaired ignored local Xcode Node env: apps/mobile/ios/.xcode.env.local
+ILS iOS Node preflight succeeded: Node v22.x.x · /opt/homebrew/bin/node
+```
+
+This is intentionally an ILS-level check rather than an IWB/Sowhat/ChatDock-specific workaround, so moving the same Expo / React Native checkout between Macs fails fast—or repairs safe machine-local state—before Xcode spends minutes archiving.
 
 ## Structured task progress
 
@@ -249,7 +303,6 @@ macOS public direct distribution:
 Profiles with empty `result_contract` continue using the older `artifact` field and, for macOS, `version_command` / `build_number_command`.
 
 Project-owned `release*.sh` scripts that self-publish also remain available as a compatibility runner. New Apple integrations should prefer Release Profiles plus `ils-result-v1`.
-
 
 ## Unified release model
 
