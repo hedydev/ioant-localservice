@@ -87,12 +87,9 @@ func TestGitPathStateRecognizesIgnoredLocalEnv(t *testing.T) {
 		t.Skip("git unavailable")
 	}
 	root := t.TempDir()
-	commands := [][]string{{"init", "-q"}}
-	for _, args := range commands {
-		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-		if raw, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v failed: %v: %s", args, err, raw)
-		}
+	cmd := exec.Command("git", "-C", root, "init", "-q")
+	if raw, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v: %s", err, raw)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("**/.xcode.env.local\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -110,6 +107,61 @@ func TestGitPathStateRecognizesIgnoredLocalEnv(t *testing.T) {
 	}
 	if tracked || !ignored {
 		t.Fatalf("tracked=%t ignored=%t, want false/true", tracked, ignored)
+	}
+}
+
+func TestPreparePortableIOSNodeEnvironmentRepairsIgnoredLocalFile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	root := t.TempDir()
+	cmd := exec.Command("git", "-C", root, "init", "-q")
+	if raw, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v: %s", err, raw)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("**/.xcode.env.local\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	localEnv := filepath.Join(root, "apps", "mobile", "ios", ".xcode.env.local")
+	if err := os.MkdirAll(filepath.Dir(localEnv), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localEnv, []byte("export NODE_BINARY=\"/Users/old/.nvm/node\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "fake-bin")
+	if err := os.MkdirAll(bin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	node := filepath.Join(bin, "node")
+	if err := os.WriteFile(node, []byte("#!/bin/sh\necho v99.1.0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	env, report, err := preparePortableIOSNodeEnvironment(
+		context.Background(), root, "ios", "expo", &log, []string{"PATH=" + bin},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := envValue(env, "NODE_BINARY"); got != node {
+		t.Fatalf("NODE_BINARY = %q, want %q", got, node)
+	}
+	if got := envValue(env, "ILS_NODE_BINARY"); got != node {
+		t.Fatalf("ILS_NODE_BINARY = %q, want %q", got, node)
+	}
+	if report.NodeVersion != "v99.1.0" || len(report.Repaired) != 1 || report.Repaired[0] != "apps/mobile/ios/.xcode.env.local" {
+		t.Fatalf("report = %#v", report)
+	}
+	raw, err := os.ReadFile(localEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "export NODE_BINARY=\""+node+"\"") {
+		t.Fatalf("local env was not repaired: %s", raw)
+	}
+	if !strings.Contains(log.String(), "Auto-repaired ignored local Xcode Node env") {
+		t.Fatalf("repair evidence missing from log: %s", log.String())
 	}
 }
 
