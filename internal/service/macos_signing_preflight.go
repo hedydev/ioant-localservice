@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 )
@@ -17,29 +16,19 @@ func isMacOSPackageOnlyLane(lane string) bool {
 	return lane == "macos-test"
 }
 
-func parseAppleDevelopmentIdentities(raw []byte) []macOSDevelopmentSigning {
+func appleDevelopmentSignings(identities []codeSigningIdentity) []macOSDevelopmentSigning {
 	out := []macOSDevelopmentSigning{}
 	seen := map[string]bool{}
-	for _, line := range strings.Split(string(raw), "\n") {
-		identity := strings.TrimSpace(line)
-		firstQuote := strings.IndexByte(identity, '"')
-		lastQuote := strings.LastIndexByte(identity, '"')
-		if firstQuote >= 0 && lastQuote > firstQuote {
-			identity = identity[firstQuote+1 : lastQuote]
-		}
-		if !strings.HasPrefix(identity, "Apple Development:") {
+	for _, item := range identities {
+		if !strings.HasPrefix(item.Identity, "Apple Development:") || item.TeamID == "" {
 			continue
 		}
-		match := signingIdentityTeamRE.FindStringSubmatch(identity)
-		if len(match) != 2 {
-			continue
-		}
-		key := match[1] + "\x00" + identity
+		key := item.TeamID + "\x00" + item.Identity
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		out = append(out, macOSDevelopmentSigning{TeamID: match[1], Identity: identity})
+		out = append(out, macOSDevelopmentSigning{TeamID: item.TeamID, Identity: item.Identity})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].TeamID != out[j].TeamID {
@@ -73,10 +62,9 @@ func selectMacOSDevelopmentSigning(identities []macOSDevelopmentSigning, preferr
 }
 
 func resolveMacOSDevelopmentSigning(ctx context.Context, preferredTeam string) (macOSDevelopmentSigning, error) {
-	cmd := exec.CommandContext(ctx, "/usr/bin/security", "find-identity", "-v", "-p", "codesigning")
-	raw, err := cmd.Output()
+	identities, err := loadCodeSigningIdentities(ctx)
 	if err != nil {
-		return macOSDevelopmentSigning{}, fmt.Errorf("无法读取这台 Mac 的 Apple Development 签名身份")
+		return macOSDevelopmentSigning{}, err
 	}
-	return selectMacOSDevelopmentSigning(parseAppleDevelopmentIdentities(raw), preferredTeam)
+	return selectMacOSDevelopmentSigning(appleDevelopmentSignings(identities), preferredTeam)
 }
