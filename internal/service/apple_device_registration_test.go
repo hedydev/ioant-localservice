@@ -24,12 +24,13 @@ func TestAppleRegistrationStatus(t *testing.T) {
 func TestSaveDeviceRecordPreservesAppleRegistrations(t *testing.T) {
 	a := &App{data: t.TempDir()}
 	registeredAt := time.Now().UTC().Add(-time.Minute)
+	firstCollectedAt := time.Now().UTC().Add(-time.Hour)
 	initial := Device{
 		UDID:        "00008101-000871A22292001E",
 		Name:        "Ted 的 iPhone",
 		Product:     "iPhone13,4",
 		Version:     "23G71",
-		CollectedAt: time.Now().UTC().Add(-time.Hour),
+		CollectedAt: firstCollectedAt,
 		Status:      "apple_registered",
 		Source:      "public_ota_gateway",
 		AppleRegistrations: map[string]AppleDeviceRegistration{
@@ -46,9 +47,21 @@ func TestSaveDeviceRecordPreservesAppleRegistrations(t *testing.T) {
 	if _, err := a.saveDeviceRecord(initial); err != nil {
 		t.Fatal(err)
 	}
+	firstSaved, err := a.readDeviceRecord(initial.UDID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !firstSaved.RegisteredAt.Equal(firstCollectedAt) {
+		t.Fatalf("registered_at = %v, want first collected time %v", firstSaved.RegisteredAt, firstCollectedAt)
+	}
+	firstUpdatedAt := firstSaved.UpdatedAt
+	if firstUpdatedAt.IsZero() {
+		t.Fatal("updated_at was not recorded")
+	}
 
 	// A later OTA sync/re-enrollment must update collected metadata without
-	// erasing the Apple-side registration that makes Ad Hoc export possible.
+	// erasing the first registry time or the Apple-side registration that makes
+	// Ad Hoc export possible.
 	refreshed := Device{
 		UDID:        initial.UDID,
 		Product:     initial.Product,
@@ -78,6 +91,12 @@ func TestSaveDeviceRecordPreservesAppleRegistrations(t *testing.T) {
 	}
 	if got.Name != initial.Name {
 		t.Fatalf("name = %q, want %q", got.Name, initial.Name)
+	}
+	if !got.RegisteredAt.Equal(firstCollectedAt) {
+		t.Fatalf("registered_at changed on refresh: %v", got.RegisteredAt)
+	}
+	if got.UpdatedAt.Before(firstUpdatedAt) {
+		t.Fatalf("updated_at moved backwards: first=%v refreshed=%v", firstUpdatedAt, got.UpdatedAt)
 	}
 }
 
