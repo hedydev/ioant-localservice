@@ -14,7 +14,7 @@ type macOSDevelopmentSigning struct {
 }
 
 func isMacOSPackageOnlyLane(lane string) bool {
-	return lane == "macos-test" || lane == "macos-portable-adhoc"
+	return lane == "macos-test"
 }
 
 func parseAppleDevelopmentIdentities(raw []byte) []macOSDevelopmentSigning {
