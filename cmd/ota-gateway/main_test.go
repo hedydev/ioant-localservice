@@ -26,7 +26,7 @@ func TestParsePlistStrings(t *testing.T) {
 
 func TestChallengeSurvivesGatewayRestartAndIsSingleUse(t *testing.T) {
 	data := t.TempDir()
-	g1 := &gateway{data: data, challenges: map[string]time.Time{}}
+	g1 := &gateway{data: data, challenges: map[string]enrollmentChallenge{}}
 	challenge, err := g1.newChallenge()
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestChallengeSurvivesGatewayRestartAndIsSingleUse(t *testing.T) {
 		t.Fatal("fresh challenge was rejected")
 	}
 
-	g2 := &gateway{data: data, challenges: map[string]time.Time{}}
+	g2 := &gateway{data: data, challenges: map[string]enrollmentChallenge{}}
 	if !g2.challengeValid(challenge) {
 		t.Fatal("persisted challenge did not survive gateway restart")
 	}
@@ -50,9 +50,26 @@ func TestChallengeSurvivesGatewayRestartAndIsSingleUse(t *testing.T) {
 	}
 }
 
+func TestNamedChallengeSurvivesGatewayRestart(t *testing.T) {
+	data := t.TempDir()
+	g1 := &gateway{data: data, challenges: map[string]enrollmentChallenge{}}
+	challenge, err := g1.newNamedChallenge("  Ted   的 iPhone  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g2 := &gateway{data: data, challenges: map[string]enrollmentChallenge{}}
+	record, ok := g2.consumeChallengeRecord(challenge)
+	if !ok {
+		t.Fatal("persisted named challenge could not be consumed")
+	}
+	if record.Name != "Ted 的 iPhone" {
+		t.Fatalf("name = %q", record.Name)
+	}
+}
+
 func TestExpiredPersistedChallengeIsRejected(t *testing.T) {
 	data := t.TempDir()
-	g := &gateway{data: data, challenges: map[string]time.Time{}}
+	g := &gateway{data: data, challenges: map[string]enrollmentChallenge{}}
 	if err := os.MkdirAll(g.challengeDir(), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +99,27 @@ func TestHealthReportsGatewayProcess(t *testing.T) {
 	}
 }
 
+func TestEnrollmentPageCollectsFriendlyDeviceName(t *testing.T) {
+	g := &gateway{}
+	req := httptest.NewRequest(http.MethodGet, "/enroll", nil)
+	res := httptest.NewRecorder()
+	g.enrollPage(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d", res.Code)
+	}
+	body := res.Body.String()
+	for _, want := range []string{
+		`<form method="post" action="/enroll.mobileconfig">`,
+		`name="name"`,
+		"设备名称",
+		"再次登记时，可以直接更新名称",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("enrollment page missing %q: %q", want, body)
+		}
+	}
+}
+
 func TestCollectedEnrollmentPageExplainsProfileCanBeRemoved(t *testing.T) {
 	g := &gateway{}
 	req := httptest.NewRequest(http.MethodGet, "/enroll?collected=1", nil)
@@ -91,8 +129,8 @@ func TestCollectedEnrollmentPageExplainsProfileCanBeRemoved(t *testing.T) {
 		t.Fatalf("status = %d", res.Code)
 	}
 	body := res.Body.String()
-	if !strings.Contains(body, "设备登记已完成") || !strings.Contains(body, "现在可以删除") || !strings.Contains(body, "删除不会取消已经完成的设备登记") {
-		t.Fatalf("completion page missing removal guidance: %q", body)
+	if !strings.Contains(body, "设备登记已完成") || !strings.Contains(body, "现在可以删除") || !strings.Contains(body, "删除不会取消已经完成的设备登记") || !strings.Contains(body, "新名称会更新到 ILS Device Registry") {
+		t.Fatalf("completion page missing removal/update guidance: %q", body)
 	}
 	if strings.Contains(body, `href="/enroll.mobileconfig"`) {
 		t.Fatal("completion page unexpectedly offers another enrollment download")
