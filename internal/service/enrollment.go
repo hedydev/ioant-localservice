@@ -29,6 +29,7 @@ type AppleDeviceRegistration struct {
 
 type Device struct {
 	UDID               string                             `json:"udid"`
+	Name               string                             `json:"name,omitempty"`
 	Product            string                             `json:"product"`
 	Version            string                             `json:"version"`
 	CollectedAt        time.Time                          `json:"collected_at"`
@@ -145,6 +146,9 @@ func (a *App) saveDeviceRecord(d Device) (bool, error) {
 			if json.Unmarshal(raw, &current) == nil {
 				if len(d.AppleRegistrations) == 0 && len(current.AppleRegistrations) > 0 {
 					d.AppleRegistrations = current.AppleRegistrations
+				}
+				if d.Name == "" {
+					d.Name = current.Name
 				}
 				if d.Source == "" {
 					d.Source = current.Source
