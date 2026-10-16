@@ -13,9 +13,10 @@ import (
 	"time"
 )
 
-// startInternalTestBuild runs package-only macOS test profiles. macos-test
-// requires a stable Apple Development identity; macos-portable-adhoc is the
-// explicit certificate-free exception. Neither lane creates a Release record.
+// startInternalTestBuild runs macos-test profiles as package-only jobs. The
+// lane requires a stable Apple Development identity so TCC sees a stable app
+// identity across rebuilds. Internal Test remains artifact-only: no Release
+// record, notarization, App Store submission, or deep validation is performed.
 func (a *App) startInternalTestBuild(w http.ResponseWriter, r *http.Request) {
 	if !a.authorized(w, r) {
 		return
@@ -53,24 +54,20 @@ func (a *App) startInternalTestBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if profile.Platform != "macos" || !isMacOSPackageOnlyLane(profile.Lane) {
-		fail(w, http.StatusBadRequest, "只有 macos-test 或 macos-portable-adhoc Profile 可以使用 package-only 打包模式")
+		fail(w, http.StatusBadRequest, "只有 macos-test Profile 可以使用 Internal Test 打包模式")
 		return
 	}
 	if profile.ResultContract != "ils-result-v1" {
-		fail(w, http.StatusBadRequest, "macOS 测试 Profile 必须使用 ils-result-v1")
+		fail(w, http.StatusBadRequest, "Internal Test Profile 必须使用 ils-result-v1")
 		return
 	}
 
-	var developmentSigning *macOSDevelopmentSigning
-	if profile.Lane == "macos-test" {
-		preflightCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-		signing, signingErr := resolveMacOSDevelopmentSigning(preflightCtx, profile.AppleTeamID)
-		cancel()
-		if signingErr != nil {
-			fail(w, http.StatusConflict, signingErr.Error())
-			return
-		}
-		developmentSigning = &signing
+	preflightCtx, cancelPreflight := context.WithTimeout(r.Context(), 8*time.Second)
+	developmentSigning, signingErr := resolveMacOSDevelopmentSigning(preflightCtx, profile.AppleTeamID)
+	cancelPreflight()
+	if signingErr != nil {
+		fail(w, http.StatusConflict, signingErr.Error())
+		return
 	}
 
 	buildType := a.readProfileBuildType(project, profile.ID)
@@ -117,7 +114,7 @@ func (a *App) startInternalTestBuild(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *App) runInternalTestBuild(ctx context.Context, cancel context.CancelFunc, job BuildJob, source BuildSource, profile ReleaseProfile, snapshot buildSourceSnapshot, developmentSigning *macOSDevelopmentSigning) {
+func (a *App) runInternalTestBuild(ctx context.Context, cancel context.CancelFunc, job BuildJob, source BuildSource, profile ReleaseProfile, snapshot buildSourceSnapshot, developmentSigning macOSDevelopmentSigning) {
 	defer func() {
 		cancel()
 		a.buildMu.Lock()
@@ -166,24 +163,11 @@ func (a *App) runInternalTestBuild(ctx context.Context, cancel context.CancelFun
 		"ILS_BUILD_TYPE="+snapshot.BuildType,
 		"ILS_PLATFORM="+profile.Platform, "ILS_CHANNEL="+profile.Channel, "ILS_ARCHITECTURE="+profile.Architecture,
 		"ILS_VARIANT="+profile.Variant, "ILS_LANE="+profile.Lane, "ILS_PUBLISH_MODE=artifact-only",
+		"ILS_APPLE_TEAM_ID="+developmentSigning.TeamID,
+		"ILS_APPLE_SIGNING_IDENTITY="+developmentSigning.Identity,
+		"APPLE_SIGNING_IDENTITY="+developmentSigning.Identity,
 	)
-	teamID := profile.AppleTeamID
-	if developmentSigning != nil {
-		teamID = developmentSigning.TeamID
-		env = append(env,
-			"ILS_APPLE_SIGNING_IDENTITY="+developmentSigning.Identity,
-			"APPLE_SIGNING_IDENTITY="+developmentSigning.Identity,
-		)
-	}
-	if teamID != "" {
-		env = append(env, "ILS_APPLE_TEAM_ID="+teamID)
-	}
-	fmt.Fprintf(log, "ILS macOS package-only build\nLane: %s\nBranch: %s\nHEAD: %s\nDirty: %t\nBuild type: %s\nNo Release record will be created. No notarization or deep bundle validation is performed by ILS.\n", profile.Lane, snapshot.Branch, snapshot.Head, snapshot.Dirty, snapshot.BuildType)
-	if developmentSigning != nil {
-		fmt.Fprintf(log, "Signing: %s\nApple Team: %s\n", developmentSigning.Identity, developmentSigning.TeamID)
-	} else {
-		fmt.Fprintln(log, "Signing policy: explicit portable ad-hoc lane; project script owns ad-hoc signing.")
-	}
+	fmt.Fprintf(log, "ILS macOS Internal Test package-only build\nBranch: %s\nHEAD: %s\nDirty: %t\nBuild type: %s\nSigning: %s\nApple Team: %s\nNo Release record will be created. No notarization or deep bundle validation is performed by ILS.\n", snapshot.Branch, snapshot.Head, snapshot.Dirty, snapshot.BuildType, developmentSigning.Identity, developmentSigning.TeamID)
 
 	var progressMu sync.Mutex
 	jobLog := &eventLog{dst: log, secret: a.token, onEvent: func(event BuildEvent) {
@@ -201,20 +185,17 @@ func (a *App) runInternalTestBuild(ctx context.Context, cancel context.CancelFun
 	_ = a.writeBuild(job)
 	fmt.Fprintf(log, "Single entrypoint: %s\n", profile.BuildCommand)
 	if err = runProcess(ctx, source.Path, jobLog, env, "/bin/bash", "-lc", profile.BuildCommand); err != nil {
-		commandFailure("macOS 测试打包", err)
+		commandFailure("Internal Test 打包", err)
 		return
 	}
 
-	// Package-only macOS test lanes intentionally avoid the normal release
-	// validation/publish pipeline. The project must return the same lane it was
-	// asked to build, and the artifact must remain inside the job output dir.
 	result, err := readBuildResult(output)
 	if err != nil {
 		finish("failed", err.Error())
 		return
 	}
-	if result.Status != "succeeded" || result.Platform != "macos" || result.Lane != profile.Lane {
-		finish("failed", fmt.Sprintf("macOS 测试结果必须是 succeeded + macos + %s", profile.Lane))
+	if result.Status != "succeeded" || result.Platform != "macos" || result.Lane != "macos-test" {
+		finish("failed", "Internal Test 结果必须是 succeeded + macos + macos-test")
 		return
 	}
 	artifact, err := outputArtifact(output, result.Artifact)
@@ -224,12 +205,12 @@ func (a *App) runInternalTestBuild(ctx context.Context, cancel context.CancelFun
 	}
 	info, err := os.Stat(artifact)
 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 {
-		finish("failed", "macOS 测试打包产物不存在或为空")
+		finish("failed", "Internal Test 打包产物不存在或为空")
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(artifact))
 	if ext != ".dmg" && ext != ".pkg" && ext != ".zip" {
-		finish("failed", "macOS 测试产物必须是 DMG、PKG 或 ZIP")
+		finish("failed", "Internal Test macOS 产物必须是 DMG、PKG 或 ZIP")
 		return
 	}
 	job.Result = &result
@@ -238,11 +219,7 @@ func (a *App) runInternalTestBuild(ctx context.Context, cancel context.CancelFun
 	job.Stage = "complete"
 	job.StageState = "succeeded"
 	job.Progress = nil
-	if profile.Lane == "macos-test" {
-		job.Message = "Apple Development 签名的 Internal Test 安装包已生成，可直接下载"
-	} else {
-		job.Message = "Portable ad-hoc 测试安装包已生成，可直接下载"
-	}
+	job.Message = "Apple Development 签名的 Internal Test 安装包已生成，可直接下载"
 	finish("succeeded", "")
 }
 
@@ -262,24 +239,24 @@ func (a *App) downloadInternalBuildArtifact(w http.ResponseWriter, r *http.Reque
 	}
 	var job BuildJob
 	if json.Unmarshal(raw, &job) != nil || job.Status != "succeeded" || !isMacOSPackageOnlyLane(job.Lane) || job.Result == nil {
-		fail(w, http.StatusConflict, "macOS 测试安装包尚未可用")
+		fail(w, http.StatusConflict, "Internal Test 安装包尚未可用")
 		return
 	}
 	output := filepath.Join(a.data, "builds", id, "output")
 	artifact, err := outputArtifact(output, job.Result.Artifact)
 	if err != nil {
-		fail(w, http.StatusNotFound, "macOS 测试安装包不存在")
+		fail(w, http.StatusNotFound, "Internal Test 安装包不存在")
 		return
 	}
 	file, err := os.Open(artifact)
 	if err != nil {
-		fail(w, http.StatusNotFound, "macOS 测试安装包不存在")
+		fail(w, http.StatusNotFound, "Internal Test 安装包不存在")
 		return
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 {
-		fail(w, http.StatusNotFound, "macOS 测试安装包不存在")
+		fail(w, http.StatusNotFound, "Internal Test 安装包不存在")
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
