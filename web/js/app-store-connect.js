@@ -3,6 +3,8 @@ import {refreshData} from './projects.js';
 import {loadBuildJobs} from './build-jobs.js';
 
 let currentStatus=null;
+let currentTeamBinding=null;
+let localSigningTeams=[];
 
 function reconciliationSummary(report){
  if(!report)return '';
@@ -36,7 +38,37 @@ function reconciliationSummary(report){
  return parts.join('；');
 }
 
-function populateConfigForm(status=currentStatus){
+function signingTeamLabel(team){
+ const identities=Array.isArray(team?.identities)?team.identities:[];
+ return identities.length?team.id+' · '+identities[0]:team.id;
+}
+
+function ensureTeamBindingField(){
+ const form=$('#asc-form');
+ if(!form||$('#asc-team-id'))return;
+ const privateKey=form.querySelector('input[name="private_key_path"]')?.closest('label');
+ if(!privateKey)return;
+ const field=document.createElement('label');
+ field.id='asc-team-binding-field';
+ field.innerHTML='Apple Developer Team <span class="meta">设备注册与 Ad Hoc 使用；Team API Key 必须绑定</span><select id="asc-team-id" autocomplete="off"><option value="">请选择这台 Mac 的 Apple Team</option></select>';
+ privateKey.before(field);
+}
+
+function renderTeamOptions(selected=''){
+ ensureTeamBindingField();
+ const select=$('#asc-team-id');
+ if(!select)return;
+ const options=['<option value="">请选择这台 Mac 的 Apple Team</option>'];
+ for(const team of localSigningTeams){
+  options.push('<option value="'+escapeHTML(team.id)+'">'+escapeHTML(signingTeamLabel(team))+'</option>');
+ }
+ select.innerHTML=options.join('');
+ const wanted=selected||currentTeamBinding?.team_id||'';
+ if(wanted&&localSigningTeams.some(team=>team.id===wanted))select.value=wanted;
+}
+
+function populateConfigForm(status=currentStatus,binding=currentTeamBinding){
+ ensureTeamBindingField();
  const form=$('#asc-form');
  form.reset();
  form.querySelector('.form-error').textContent='';
@@ -46,10 +78,12 @@ function populateConfigForm(status=currentStatus){
   form.elements.issuer_id.value=status.issuer_id||'';
   form.elements.private_key_path.value=status.private_key_path||'';
  }
+ renderTeamOptions(binding?.configured?binding.team_id:'');
 }
 
-function renderStatus(status){
+function renderStatus(status,binding=currentTeamBinding){
  currentStatus=status;
+ currentTeamBinding=binding||null;
  const container=$('#asc-status');
  if(!status.configured){
   container.innerHTML='<div class="asc-status-card unconfigured"><div class="asc-status-head"><strong>尚未配置 App Store Connect API Key</strong><span class="release-status status-submitted">需要配置</span></div><p>TestFlight 仍可通过 Xcode 已登录账号上传，但 ILS 无法自动读取 Apple Processing、Beta 状态和 Public Link。</p></div>';
@@ -62,14 +96,18 @@ function renderStatus(status){
   const lastCheck=status.last_check_at?formatDate(status.last_check_at):'尚未验证';
   const connectionText=checking?'正在同步 TestFlight 状态':connected?'App Store Connect 已连接':'已配置，连接尚未通过';
   const connectionClass=checking?'status-processing':connected?'status-available':'status-unavailable';
+  const teamText=binding?.configured?binding.team_id:'未绑定';
   container.innerHTML='<div class="asc-status-card">'+
    '<div class="asc-status-head"><strong>'+escapeHTML(connectionText)+'</strong><span class="release-status '+connectionClass+'">'+escapeHTML(keyType)+'</span></div>'+
    '<div class="asc-status-grid">'+
     '<span><small>Key ID</small><strong>'+escapeHTML(status.key_id||'—')+'</strong></span>'+
+    '<span><small>Apple Team</small><strong>'+escapeHTML(teamText)+'</strong></span>'+
     '<span><small>状态同步</small><strong>'+escapeHTML(connected?'可用':'等待验证')+'</strong></span>'+
     '<span><small>TestFlight 上传认证</small><strong>'+escapeHTML(uploadAuth)+'</strong></span>'+
     '<span><small>最近检查</small><strong>'+escapeHTML(lastCheck)+'</strong></span>'+
    '</div>'+
+   (team&&!binding?.configured?'<p class="asc-warning">Team API Key 尚未绑定 Apple Team；设备注册会被阻止，直到完成绑定。</p>':'')+
+   (binding?.stale?'<p class="asc-warning">当前 API Key 已变更，请重新绑定 Apple Team。</p>':'')+
    (status.private_key_mode&&status.private_key_mode!=='0600'?'<p class="asc-warning">私钥权限为 '+escapeHTML(status.private_key_mode)+'；建议改为 0600，仅当前用户可读写。</p>':'')+
    (status.last_error?'<p class="form-error">'+escapeHTML(status.last_error)+'</p>':'')+
   '</div>';
@@ -80,10 +118,25 @@ function renderStatus(status){
  $('#asc-delete').disabled=!status.configured||status.refreshing;
 }
 
+async function loadTeamContext(){
+ const [binding,teams]=await Promise.all([
+  api('/api/app-store-connect/team-binding').catch(()=>null),
+  api('/api/local/apple-signing-teams').catch(()=>[])
+ ]);
+ currentTeamBinding=binding;
+ localSigningTeams=Array.isArray(teams)?teams:[];
+ renderTeamOptions(binding?.configured?binding.team_id:'');
+ return binding;
+}
+
 async function loadConfig(){
  if(!state.admin)return;
  try{
-  renderStatus(await api('/api/app-store-connect/config'));
+  const [status,binding]=await Promise.all([
+   api('/api/app-store-connect/config'),
+   loadTeamContext()
+  ]);
+  renderStatus(status,binding);
  }catch(error){
   $('#asc-status').textContent=error.message;
  }
@@ -95,7 +148,7 @@ async function refreshStatus({announce=true}={}){
  if(announce)notice('正在同步 ILS Release 与 App Store Connect 状态…','progress',0);
  try{
   const result=await api('/api/app-store-connect/refresh',{method:'POST'});
-  renderStatus(result.status);
+  renderStatus(result.status,currentTeamBinding);
   await refreshData();
   await loadBuildJobs();
   if(announce){
@@ -119,9 +172,16 @@ async function refreshStatus({announce=true}={}){
 }
 
 async function saveConfig(form){
+ ensureTeamBindingField();
  const button=form.querySelector('[type=submit]');
- button.disabled=true;
+ const teamID=$('#asc-team-id')?.value||'';
+ const issuerID=String(form.elements.issuer_id?.value||'').trim();
  form.querySelector('.form-error').textContent='';
+ if(issuerID&&!teamID){
+  form.querySelector('.form-error').textContent='Team API Key 必须绑定这台 Mac 上对应的 Apple Team。';
+  return;
+ }
+ button.disabled=true;
  $('#asc-dialog-status').textContent='正在保存并验证…';
  try{
   const status=await api('/api/app-store-connect/config',{
@@ -129,20 +189,30 @@ async function saveConfig(form){
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify(Object.fromEntries(new FormData(form)))
   });
-  renderStatus(status);
+  let binding=currentTeamBinding;
+  if(teamID){
+   binding=await api('/api/app-store-connect/team-binding',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({team_id:teamID})
+   });
+   currentTeamBinding=binding;
+  }
+  renderStatus(status,binding);
+  window.dispatchEvent(new CustomEvent('asc-team-binding-changed',{detail:{binding}}));
   if(status.connected){
    $('#asc-dialog').close();
    try{
     const result=await refreshStatus({announce:false});
     const warning=result.reconciliation_warning||result.warning;
     notice(warning
-     ?'App Store Connect API 已连接；发布状态已刷新，但存在警告：'+warning
-     :'App Store Connect API 已连接，并已同步 TestFlight 发布状态。',warning?'warning':'success',6500);
+     ?'App Store Connect API 已连接；Apple Team '+teamID+' 已绑定；发布状态已刷新，但存在警告：'+warning
+     :'App Store Connect API 已连接，Apple Team '+teamID+' 已绑定，并已同步 TestFlight 发布状态。',warning?'warning':'success',6500);
    }catch{
-    notice('App Store Connect API 已连接，但发布状态同步失败；请查看状态。','warning',6500);
+    notice('App Store Connect API 已连接，Apple Team 已绑定，但发布状态同步失败；请查看状态。','warning',6500);
    }
   }else{
-   $('#asc-dialog-status').textContent='配置已保存，但连接验证未通过；请检查 Key、Issuer ID 和私钥路径。';
+   $('#asc-dialog-status').textContent='配置已保存，但连接验证未通过；请检查 Key、Issuer ID、Apple Team 和私钥路径。';
   }
  }catch(error){
   form.querySelector('.form-error').textContent=error.message;
@@ -158,7 +228,7 @@ async function checkConnection(){
  notice('正在验证 App Store Connect 连接…','progress',0);
  try{
   const status=await api('/api/app-store-connect/check',{method:'POST'});
-  renderStatus(status);
+  renderStatus(status,currentTeamBinding);
   notice(
    status.connected?'App Store Connect API 连接正常。':'App Store Connect API 连接未通过。',
    status.connected?'success':'warning',
@@ -174,13 +244,17 @@ async function checkConnection(){
 
 function clearConfigUI(){
  currentStatus=null;
+ currentTeamBinding=null;
+ localSigningTeams=[];
  $('#asc-status').textContent='';
- populateConfigForm(null);
+ populateConfigForm(null,null);
  if($('#asc-dialog')?.open)$('#asc-dialog').close();
 }
 
 export function initAppStoreConnect(){
- $('#asc-configure').onclick=()=>{
+ ensureTeamBindingField();
+ $('#asc-configure').onclick=async()=>{
+  await loadTeamContext();
   populateConfigForm();
   $('#asc-dialog').showModal();
  };
@@ -206,11 +280,14 @@ export function initAppStoreConnect(){
  $('#asc-delete').onclick=async()=>{
   if(!confirm('移除 ILS 的 App Store Connect API 配置？不会删除磁盘上的 .p8 私钥。'))return;
   try{
+   await api('/api/app-store-connect/team-binding',{method:'DELETE'}).catch(()=>null);
    const status=await api('/api/app-store-connect/config',{method:'DELETE'});
-   renderStatus(status);
-   populateConfigForm(status);
+   currentTeamBinding=null;
+   renderStatus(status,null);
+   populateConfigForm(status,null);
+   window.dispatchEvent(new CustomEvent('asc-team-binding-changed',{detail:{binding:null}}));
    $('#asc-dialog').close();
-   notice('App Store Connect API 配置已从 ILS 移除。','success');
+   notice('App Store Connect API 配置和 Apple Team 绑定已从 ILS 移除。','success');
   }catch(error){
    $('#asc-dialog-status').textContent=error.message;
   }
