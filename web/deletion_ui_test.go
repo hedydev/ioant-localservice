@@ -11,15 +11,36 @@ func TestDeletionControlsStayWired(t *testing.T) {
 		t.Fatal(err)
 	}
 	buildJS := string(buildRaw)
+	if !strings.Contains(buildJS, "data-delete-build-job") {
+		t.Fatal("build-jobs.js must render build deletion controls")
+	}
+
+	cascadeRaw, err := Files.ReadFile("js/build-deletion-ui.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cascadeJS := string(cascadeRaw)
 	for _, required := range []string{
 		"data-delete-build-job",
 		"method:'DELETE'",
-		"正式 Release / 已发布安装包不会被删除",
+		"deleted_release_ids",
+		"版本历史",
+		"OTA Gateway",
+		"TestFlight",
+		"data-refreshed",
 		"build-record-deleted",
 	} {
-		if !strings.Contains(buildJS, required) {
-			t.Fatalf("build-jobs.js missing deletion contract %q", required)
+		if !strings.Contains(cascadeJS, required) {
+			t.Fatalf("build-deletion-ui.js missing cascade contract %q", required)
 		}
+	}
+
+	appRaw, err := Files.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(appRaw), "./js/build-deletion-ui.js") {
+		t.Fatal("app.js must initialize build deletion cascade UI")
 	}
 
 	releasesRaw, err := Files.ReadFile("js/releases.js")
