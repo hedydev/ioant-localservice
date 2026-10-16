@@ -32,6 +32,7 @@ const optionalModules=[
  ['./js/build-profiles.js','initBuildProfiles','Release Profile'],
  ['./js/internal-test-ui.js','initInternalTestUI','Internal Test UI'],
  ['./js/build-jobs.js','initBuildJobs','构建任务'],
+ ['./js/build-deletion-ui.js','initBuildDeletionUI','构建删除'],
  ['./js/simulator-run-ui.js','initSimulatorRunUI','Simulator Run UI'],
  ['./js/build-log-live.js','initBuildLogLive','实时日志'],
  ['./js/ios.js','initIOS','iOS'],
