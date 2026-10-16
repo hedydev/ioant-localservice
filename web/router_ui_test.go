@@ -13,7 +13,7 @@ func TestProjectAwareSPARouting(t *testing.T) {
 	router := string(routerRaw)
 	for _, required := range []string{
 		"#/projects/",
-		"export const globalViews=new Set(['services','settings'])",
+		"export const globalViews=new Set(['services','apple','settings'])",
 		"if(globalViews.has(view))return '#/'+view;",
 		"export function readRoute()",
 		"export function writeRoute(",
