@@ -1,5 +1,5 @@
 export const projectViews=new Set(['overview','builds','releases','ios','automation']);
-export const globalViews=new Set(['services','settings']);
+export const globalViews=new Set(['services','apple','settings']);
 export const validViews=new Set([...globalViews,...projectViews]);
 
 export function readRoute(){
