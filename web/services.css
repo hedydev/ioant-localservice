@@ -1,0 +1,218 @@
+/* Device & OTA management layout. Loaded only by the global services module. */
+#view-services:not([hidden]){
+  grid-template-columns:minmax(0,1fr);
+  max-width:1180px;
+}
+
+#view-services>.panel-card,
+#view-services>.panel-card[data-admin],
+#view-services>.panel-card:not([data-admin]){
+  grid-column:1/-1;
+  height:auto;
+}
+
+#view-services>.ota-gateway-card{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:12px 18px;
+  align-items:center;
+}
+
+#view-services>.ota-gateway-card>.section-heading,
+#view-services>.ota-gateway-card>p{
+  grid-column:1/-1;
+}
+
+#view-services>.ota-gateway-card>.section-heading{
+  margin-bottom:0;
+}
+
+#view-services>.ota-gateway-card>p{
+  margin:0;
+}
+
+#view-services>.ota-gateway-card>#ota-gateway-status{
+  margin:0;
+  min-width:0;
+}
+
+#view-services>.ota-gateway-card>.persistent-config-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  margin:0;
+  white-space:nowrap;
+}
+
+#view-services>.ota-gateway-card>.persistent-config-actions button{
+  flex:0 0 auto;
+}
+
+#view-services>.device-management-card{
+  overflow:hidden;
+}
+
+#view-services>.device-management-card>.persistent-config-actions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+#view-services #devices-list.device-registry-table-wrap{
+  max-height:560px;
+  overflow:auto;
+  margin-top:14px;
+  border:1px solid var(--line);
+  border-radius:10px;
+}
+
+.device-registry-table{
+  width:100%;
+  min-width:1000px;
+  border-collapse:separate;
+  border-spacing:0;
+  table-layout:fixed;
+  font-size:.8125rem;
+}
+
+.device-registry-table th,
+.device-registry-table td{
+  padding:12px 13px;
+  border-bottom:1px solid var(--line);
+  text-align:left;
+  vertical-align:middle;
+}
+
+.device-registry-table th{
+  position:sticky;
+  top:0;
+  z-index:2;
+  background:#f5f8fa;
+  color:var(--muted);
+  font-size:.75rem;
+  font-weight:650;
+  white-space:nowrap;
+}
+
+.device-registry-table tbody tr:last-child td{
+  border-bottom:0;
+}
+
+.device-registry-table tbody tr:hover td{
+  background:#f9fbfc;
+}
+
+.device-registry-table th:nth-child(1){width:15%}
+.device-registry-table th:nth-child(2){width:13%}
+.device-registry-table th:nth-child(3){width:20%}
+.device-registry-table th:nth-child(4){width:22%}
+.device-registry-table th:nth-child(5){width:19%}
+.device-registry-table th:nth-child(6){width:11%}
+
+.device-name-line{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  flex-wrap:wrap;
+}
+
+.device-name-line>strong,
+.device-secondary{
+  color:inherit;
+  font-weight:650;
+}
+
+.device-name-line .badge{
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.device-registry-table td>small,
+.device-table-warning small{
+  display:block;
+  margin-top:2px;
+  color:var(--muted);
+  font-size:.72rem;
+  line-height:1.35;
+}
+
+.device-udid{
+  display:block;
+  font-size:.76rem;
+  line-height:1.45;
+  word-break:break-all;
+}
+
+.device-team-select{
+  width:100%;
+  max-width:100%;
+  padding:7px 9px;
+  font-size:.76rem;
+  text-overflow:ellipsis;
+}
+
+.device-team-select:disabled{
+  cursor:default;
+  opacity:.78;
+}
+
+.device-registration-status{
+  display:block;
+  font-size:.78rem;
+  line-height:1.45;
+  overflow-wrap:anywhere;
+}
+
+.device-table-warning{
+  display:block;
+  color:#8a641e;
+  font-weight:600;
+  overflow-wrap:anywhere;
+}
+
+.device-action-cell{
+  text-align:right;
+}
+
+.device-action{
+  width:100%;
+  min-width:0;
+  padding:8px 10px;
+  white-space:normal;
+  line-height:1.3;
+}
+
+:root[data-theme="dark"] .device-registry-table th{
+  background:var(--dark-card-raised,#1a2732);
+  color:var(--dark-muted,#a2b1bf);
+}
+
+:root[data-theme="dark"] .device-registry-table tbody tr:hover td{
+  background:#ffffff08;
+}
+
+:root[data-theme="dark"] .device-table-warning{
+  color:var(--dark-amber,#e7bd72);
+}
+
+@media(max-width:760px){
+  #view-services>.ota-gateway-card{
+    grid-template-columns:minmax(0,1fr);
+  }
+
+  #view-services>.ota-gateway-card>.persistent-config-actions{
+    justify-content:stretch;
+    flex-wrap:wrap;
+  }
+
+  #view-services>.ota-gateway-card>.persistent-config-actions button{
+    flex:1 1 180px;
+  }
+
+  #view-services #devices-list.device-registry-table-wrap{
+    max-height:65vh;
+  }
+}
