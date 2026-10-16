@@ -173,6 +173,10 @@ func (a *App) registerDeviceWithApple(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "请先配置 App Store Connect API Key")
 		return
 	}
+	if e = a.validateAppStoreConnectTeamSelection(cfg, teamID); e != nil {
+		fail(w, http.StatusConflict, e.Error())
+		return
+	}
 	a.enrollmentMu.Lock()
 	d, e := a.readDeviceRecord(udid)
 	a.enrollmentMu.Unlock()
