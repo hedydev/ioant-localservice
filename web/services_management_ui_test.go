@@ -12,22 +12,27 @@ func TestServicesManagementLayout(t *testing.T) {
 	}
 	services := string(servicesRaw)
 	for _, required := range []string{
-		"services.css?v=20261016-table",
+		"services.css?v=20261016-times",
 		"function ensureServicesLayout()",
 		"heading.after(gateway)",
 		"ota-gateway-card",
 		"device-management-card",
 		"device-registry-table-wrap",
 		"<table class=\"device-registry-table\"",
-		"<th>设备</th><th>系统 / 来源</th><th>UDID</th><th>Apple Team</th><th>Apple 注册状态</th><th>操作</th>",
+		"<th>设备</th><th>系统 / 来源</th><th>登记 / 更新（本地）</th><th>UDID</th><th>Apple Team</th><th>Apple 注册状态</th><th>操作</th>",
 		"String(device.name||'').trim()",
-		"再次通过 ota.ioant.com 登记可设置设备名称",
+		"device.registered_at||device.collected_at",
+		"device.updated_at||device.collected_at",
+		"toLocaleString('zh-CN'",
 		"data-apple-register",
 		"刷新 Apple 状态",
 	} {
 		if !strings.Contains(services, required) {
 			t.Fatalf("services.js missing management UI contract %q", required)
 		}
+	}
+	if strings.Contains(services, "再次通过 ota.ioant.com 登记可设置设备名称") {
+		t.Fatal("device rows must not show instructional helper copy")
 	}
 
 	cssRaw, err := Files.ReadFile("services.css")
@@ -41,6 +46,7 @@ func TestServicesManagementLayout(t *testing.T) {
 		"#view-services>.device-management-card",
 		".device-registry-table",
 		"position:sticky",
+		".device-time-cell",
 		".device-team-select",
 		".device-action-cell",
 	} {
