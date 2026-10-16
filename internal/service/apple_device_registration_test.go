@@ -26,6 +26,7 @@ func TestSaveDeviceRecordPreservesAppleRegistrations(t *testing.T) {
 	registeredAt := time.Now().UTC().Add(-time.Minute)
 	initial := Device{
 		UDID:        "00008101-000871A22292001E",
+		Name:        "Ted 的 iPhone",
 		Product:     "iPhone13,4",
 		Version:     "23G71",
 		CollectedAt: time.Now().UTC().Add(-time.Hour),
@@ -75,9 +76,19 @@ func TestSaveDeviceRecordPreservesAppleRegistrations(t *testing.T) {
 	if got.Status != "apple_registered" {
 		t.Fatalf("status = %q, want apple_registered", got.Status)
 	}
+	if got.Name != initial.Name {
+		t.Fatalf("name = %q, want %q", got.Name, initial.Name)
+	}
 }
 
-func TestAppleDeviceDisplayNameUsesProductAndUDIDSuffix(t *testing.T) {
+func TestAppleDeviceDisplayNamePrefersFriendlyRegistryName(t *testing.T) {
+	d := Device{UDID: "00008101-000871A22292001E", Name: "Ted 的 iPhone", Product: "iPhone13,4"}
+	if got, want := appleDeviceDisplayName(d), "Ted 的 iPhone"; got != want {
+		t.Fatalf("name = %q, want %q", got, want)
+	}
+}
+
+func TestAppleDeviceDisplayNameUsesProductAndUDIDSuffixAsFallback(t *testing.T) {
 	d := Device{UDID: "00008101-000871A22292001E", Product: "iPhone13,4"}
 	if got, want := appleDeviceDisplayName(d), "ILS iPhone13,4 2292001E"; got != want {
 		t.Fatalf("name = %q, want %q", got, want)
