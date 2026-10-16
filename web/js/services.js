@@ -5,6 +5,7 @@ let gatewayConfigured=false;
 let gatewaySyncing=false;
 let signingTeams=[];
 let devices=[];
+let ascTeamBinding=null;
 
 function isIOSDevice(){
  const ua=navigator.userAgent||'';
@@ -69,6 +70,11 @@ function teamLabel(team){
  return team.id+' · '+identities[0];
 }
 
+function boundSigningTeam(){
+ const teamID=ascTeamBinding?.configured?ascTeamBinding.team_id:'';
+ return teamID?signingTeams.find(team=>team.id===teamID)||null:null;
+}
+
 function ensureDeviceListContainer(){
  const current=$('#devices-list');
  if(!current||current.tagName!=='PRE')return current;
@@ -79,6 +85,21 @@ function ensureDeviceListContainer(){
  return replacement;
 }
 
+function deviceRegistrationActions(device){
+ if(!ascTeamBinding?.configured){
+  const message=ascTeamBinding?.message||'请先在 App Store Connect 配置中绑定 Apple Team。';
+  return '<p class="config-warning">'+escapeHTML(message)+' 设备注册已禁用。</p>';
+ }
+ const team=boundSigningTeam();
+ if(!team){
+  return '<p class="config-warning">当前 API Key 绑定 Apple Team '+escapeHTML(ascTeamBinding.team_id)+'，但这台 Mac 没有检测到该 Team 的代码签名身份；设备注册已禁用。</p>';
+ }
+ return '<div class="persistent-config-actions">'+
+  '<label>Apple Team<select data-device-team="'+escapeHTML(device.udid)+'" disabled><option value="'+escapeHTML(team.id)+'" selected>'+escapeHTML(teamLabel(team))+'</option></select></label>'+
+  '<button type="button" data-apple-register="'+escapeHTML(device.udid)+'">注册到 Apple / 刷新状态</button>'+
+ '</div>';
+}
+
 function renderDevices(){
  const container=ensureDeviceListContainer();
  if(!container)return;
@@ -86,7 +107,6 @@ function renderDevices(){
   container.innerHTML='<div class="persistent-config-empty"><strong>还没有登记设备</strong>新设备从公网 OTA Gateway 同步后会出现在这里。</div>';
   return;
  }
- const teamOptions=signingTeams.map(team=>'<option value="'+escapeHTML(team.id)+'">'+escapeHTML(teamLabel(team))+'</option>').join('');
  container.innerHTML=devices.map(device=>{
   const registrations=device.apple_registrations||{};
   const registeredTeams=Object.values(registrations).filter(item=>item&&item.status==='registered');
@@ -94,19 +114,13 @@ function renderDevices(){
    ?registeredTeams.map(item=>'Team '+item.team_id+' · '+registrationLabel(item)).join('；')
    :'尚未注册到 Apple Developer Team';
   const statusClass=registeredTeams.length?'config-ok':device.status==='apple_registration_attention'?'config-error':'config-warning';
-  const actions=signingTeams.length
-   ?'<div class="persistent-config-actions">'+
-      '<label>Apple Team<select data-device-team="'+escapeHTML(device.udid)+'">'+teamOptions+'</select></label>'+
-      '<button type="button" data-apple-register="'+escapeHTML(device.udid)+'">注册到 Apple / 刷新状态</button>'+
-     '</div>'
-   :'<p class="config-warning">这台 Mac 没有检测到可用的 Apple 签名 Team，无法确定 Ad Hoc 使用哪个 Team。</p>';
   return '<div class="release">'+
    '<div class="section-heading"><div><h2>'+escapeHTML(device.product||'iOS Device')+'</h2><span class="meta">iOS '+escapeHTML(device.version||'')+' · '+escapeHTML(sourceName(device.source))+'</span></div><span class="badge">'+escapeHTML(device.status||'pending_apple_registration')+'</span></div>'+
    '<div class="persistent-config-grid">'+
     '<span><small>UDID</small><strong>'+escapeHTML(device.udid)+'</strong></span>'+
     '<span><small>Apple 注册状态</small><strong class="'+statusClass+'">'+escapeHTML(summary)+'</strong></span>'+
-   '</div>'+actions+
-   '<p class="meta">Apple 注册请求使用当前 ILS 的 App Store Connect API Key；请选择与后续 Ad Hoc Release Profile 相同的 Apple Team。</p>'+
+   '</div>'+deviceRegistrationActions(device)+
+   '<p class="meta">Apple 注册只能使用当前 App Store Connect API Key 已绑定的 Apple Team；请让它与后续 Ad Hoc Release Profile 的 Apple Team 保持一致。</p>'+
   '</div>';
  }).join('');
 }
@@ -122,6 +136,16 @@ async function loadSigningTeams(){
  return signingTeams;
 }
 
+async function loadASCTeamBinding(){
+ if(!state.admin)return null;
+ try{
+  ascTeamBinding=await api('/api/app-store-connect/team-binding');
+ }catch(error){
+  ascTeamBinding={configured:false,message:error.message};
+ }
+ return ascTeamBinding;
+}
+
 async function loadDevices(){
  if(!state.admin)return;
  devices=await api('/api/devices');
@@ -130,9 +154,11 @@ async function loadDevices(){
 
 async function registerDeviceWithApple(udid,button){
  if(!needAdmin())return;
+ if(!ascTeamBinding?.configured)return notice(ascTeamBinding?.message||'请先在 App Store Connect 配置中绑定 Apple Team。','error',8000);
  const selector=document.querySelector('[data-device-team="'+CSS.escape(udid)+'"]');
  const teamID=selector?.value||'';
- if(!teamID)return notice('请先选择 Apple Team。','error');
+ if(!teamID)return notice('当前绑定的 Apple Team 在这台 Mac 上不可用。','error');
+ if(teamID!==ascTeamBinding.team_id)return notice('当前设备 Team 与 App Store Connect API Key 绑定 Team 不一致。','error',8000);
  button.disabled=true;
  const old=button.textContent;
  button.textContent='正在联系 Apple…';
@@ -231,10 +257,11 @@ async function syncGatewayArtifacts(){
 async function refreshGlobalServices({sync=true}={}){
  await checkEnrollmentAvailability();
  if(!state.admin)return;
- await loadSigningTeams();
+ await Promise.all([loadSigningTeams(),loadASCTeamBinding()]);
  const status=await refreshOTAGatewayStatus();
  if(sync&&status?.configured)await syncGatewayDevices({silent:true});
  else await loadDevices();
+ renderDevices();
 }
 
 function resetGlobalServices(){
@@ -242,6 +269,7 @@ function resetGlobalServices(){
  gatewaySyncing=false;
  signingTeams=[];
  devices=[];
+ ascTeamBinding=null;
  const container=ensureDeviceListContainer();
  if(container)container.textContent='正在读取设备…';
  $('#ota-gateway-status').textContent='正在读取 OTA Gateway 配置…';
@@ -254,7 +282,7 @@ export function initServices(){
  $('#devices-button').onclick=async()=>{
   if(!needAdmin())return;
   try{
-   await Promise.all([loadSigningTeams(),loadDevices()]);
+   await Promise.all([loadSigningTeams(),loadASCTeamBinding(),loadDevices()]);
    renderDevices();
   }catch(error){
    notice(error.message,'error');
@@ -267,7 +295,7 @@ export function initServices(){
  });
 
  $('#ota-sync-devices').onclick=()=>syncGatewayDevices();
- $('#ota-sync-artifacts').onclick=()=>syncGatewayArtifacts();
+ $('#ota-sync-artifacts').onclick=syncGatewayArtifacts;
  $('#ota-gateway-check').onclick=async()=>{
   if(!needAdmin())return;
   const button=$('#ota-gateway-check');
@@ -292,6 +320,11 @@ export function initServices(){
  window.addEventListener('admin-cleared',resetGlobalServices);
  window.addEventListener('view-changed',event=>{
   if(event.detail.view==='services')refreshGlobalServices({sync:true});
+ });
+ window.addEventListener('asc-team-binding-changed',()=>{
+  if(state.admin&&state.view==='services'){
+   void Promise.all([loadSigningTeams(),loadASCTeamBinding()]).then(renderDevices);
+  }
  });
 
  setInterval(()=>{
