@@ -16,10 +16,12 @@ function updateHeading(){
 
 function updateNavigationSelection(){
  const global=isGlobalView(state.view);
- const services=state.view==='services';
- $('#global-services-button')?.classList.toggle('active',services);
- if(services)$('#global-services-button')?.setAttribute('aria-current','page');
- else $('#global-services-button')?.removeAttribute('aria-current');
+ document.querySelectorAll('#global-services-nav [data-global-view]').forEach(button=>{
+  const active=global&&button.dataset.globalView===state.view;
+  button.classList.toggle('active',active);
+  if(active)button.setAttribute('aria-current','page');
+  else button.removeAttribute('aria-current');
+ });
 
  document.querySelectorAll('#projects [data-project]').forEach(button=>{
   const active=!global&&button.dataset.project===state.project;
