@@ -54,6 +54,7 @@ type OTAReleaseInfo struct {
 type gatewayPendingDevice struct {
 	ID          string    `json:"id"`
 	UDID        string    `json:"udid"`
+	Name        string    `json:"name,omitempty"`
 	Product     string    `json:"product"`
 	Version     string    `json:"version"`
 	CollectedAt time.Time `json:"collected_at"`
@@ -305,6 +306,7 @@ func (a *App) syncGatewayDevices(ctx context.Context) (OTASyncReport, error) {
 		}
 		d := Device{
 			UDID:             item.UDID,
+			Name:             item.Name,
 			Product:          item.Product,
 			Version:          item.Version,
 			CollectedAt:      item.CollectedAt,
