@@ -34,9 +34,15 @@ var (
 type pendingDevice struct {
 	ID          string    `json:"id"`
 	UDID        string    `json:"udid"`
+	Name        string    `json:"name,omitempty"`
 	Product     string    `json:"product"`
 	Version     string    `json:"version"`
 	CollectedAt time.Time `json:"collected_at"`
+}
+
+type enrollmentChallenge struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	Name      string    `json:"name,omitempty"`
 }
 
 type gateway struct {
@@ -48,7 +54,7 @@ type gateway struct {
 	profileSigningCA   string
 
 	mu         sync.Mutex
-	challenges map[string]time.Time
+	challenges map[string]enrollmentChallenge
 }
 
 func randomHex(n int) string {
@@ -117,19 +123,38 @@ func (g *gateway) health(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func normalizeDeviceName(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if len(runes) > 80 {
+		value = string(runes[:80])
+	}
+	return strings.TrimSpace(value)
+}
+
 func (g *gateway) enrollPage(w http.ResponseWriter, r *http.Request) {
 	collected := r.URL.Query().Get("collected") == "1"
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 
 	title := "登记这台 iPhone / iPad"
-	body := "<p>ILS 只收集 UDID、设备型号和 iOS 版本，用于管理员登记 Ad Hoc 测试设备。不会安装 MDM、根证书或授予额外设备权限。</p>" +
-		"<a class=\"button\" href=\"/enroll.mobileconfig\">下载设备登记描述文件</a>" +
-		"<small>下载后请在“设置”中安装已下载的描述文件。登记链接 1 小时内有效，并且只能成功使用一次。</small>"
+	body := "<p>先给设备起一个容易识别的名称。ILS 会把这个名称与 UDID 一起保存；同一台设备以后再次登记时，可以直接更新名称。</p>" +
+		"<form method=\"post\" action=\"/enroll.mobileconfig\">" +
+		"<label for=\"device-name\">设备名称</label>" +
+		"<input id=\"device-name\" name=\"name\" type=\"text\" maxlength=\"80\" autocomplete=\"off\" required placeholder=\"例如：Ted 的 iPhone\">" +
+		"<button class=\"button\" type=\"submit\">下载设备登记描述文件</button></form>" +
+		"<small>随后请在“设置”中安装已下载的描述文件。ILS 只收集你填写的名称、UDID、设备型号和 iOS 版本，不安装 MDM、根证书或授予额外设备权限。登记链接 1 小时内有效并且只能成功使用一次。</small>"
 	if collected {
 		title = "设备登记已完成"
 		body = "<div class=\"ok\">设备信息已经安全提交到 ILS OTA Gateway。</div>" +
-			"<p>这个描述文件只用于一次性读取 UDID、设备型号和系统版本。登记数据已经保存，后续同步到 ILS、Apple Developer 注册和 Ad Hoc 安装都不依赖它继续留在手机上。</p>" +
+			"<p>设备名称、UDID、设备型号和系统版本已经保存。若以后想修改设备名称，只需再次打开这个页面重新登记同一台设备，新名称会更新到 ILS Device Registry。</p>" +
 			"<p><strong>现在可以删除“ILS 设备信息收集”描述文件。</strong></p>" +
 			"<small>路径：设置 → 通用 → VPN 与设备管理 → ILS 设备信息收集 → 移除已下载的描述文件。删除不会取消已经完成的设备登记。</small>"
 	}
@@ -137,7 +162,8 @@ func (g *gateway) enrollPage(w http.ResponseWriter, r *http.Request) {
 	page := "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
 		"<title>ILS 设备登记</title><style>body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;background:#f5f7fa;color:#182736;margin:0}" +
 		"main{max-width:560px;margin:0 auto;padding:48px 22px}.card{background:#fff;border:1px solid #dde4ea;border-radius:16px;padding:26px;box-shadow:0 8px 30px #14253812}" +
-		"h1{font-size:24px;margin:0 0 10px}p{line-height:1.65;color:#536577}strong{color:#182736}a.button{display:inline-block;margin-top:10px;padding:12px 16px;border-radius:10px;background:#182736;color:#fff;text-decoration:none;font-weight:650}" +
+		"h1{font-size:24px;margin:0 0 10px}p{line-height:1.65;color:#536577}strong{color:#182736}form{margin-top:18px}label{display:block;font-size:14px;font-weight:650;margin-bottom:7px}" +
+		"input{box-sizing:border-box;width:100%;border:1px solid #cbd6df;border-radius:10px;padding:12px 13px;font:inherit;color:#182736;background:#fff}button.button{display:block;width:100%;border:0;margin-top:12px;padding:12px 16px;border-radius:10px;background:#182736;color:#fff;font:inherit;font-weight:650}" +
 		"small{display:block;margin-top:18px;color:#7a8794;line-height:1.55}.ok{padding:12px 14px;border-radius:10px;background:#eef7f1;color:#246e52;margin-bottom:16px}</style></head>" +
 		"<body><main><div class=\"card\"><h1>" + title + "</h1>" + body + "</div></main></body></html>"
 	_, _ = io.WriteString(w, page)
@@ -151,33 +177,46 @@ func (g *gateway) challengePath(challenge string) string {
 	return filepath.Join(g.challengeDir(), challenge+".challenge")
 }
 
-func (g *gateway) loadChallengeLocked(challenge string) (time.Time, bool) {
+func parseChallengeRecord(raw []byte) (enrollmentChallenge, error) {
+	var record enrollmentChallenge
+	if json.Unmarshal(raw, &record) == nil && !record.ExpiresAt.IsZero() {
+		record.Name = normalizeDeviceName(record.Name)
+		return record, nil
+	}
+	expires, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(raw)))
+	if err != nil {
+		return enrollmentChallenge{}, err
+	}
+	return enrollmentChallenge{ExpiresAt: expires}, nil
+}
+
+func (g *gateway) loadChallengeLocked(challenge string) (enrollmentChallenge, bool) {
 	if !challengeRE.MatchString(challenge) {
-		return time.Time{}, false
+		return enrollmentChallenge{}, false
 	}
 	now := time.Now()
-	if expires, ok := g.challenges[challenge]; ok {
-		if now.Before(expires) {
-			return expires, true
+	if record, ok := g.challenges[challenge]; ok {
+		if now.Before(record.ExpiresAt) {
+			return record, true
 		}
 		delete(g.challenges, challenge)
 		_ = os.Remove(g.challengePath(challenge))
-		return time.Time{}, false
+		return enrollmentChallenge{}, false
 	}
 	raw, err := os.ReadFile(g.challengePath(challenge))
 	if err != nil {
-		return time.Time{}, false
+		return enrollmentChallenge{}, false
 	}
-	expires, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(raw)))
-	if err != nil || !now.Before(expires) {
+	record, err := parseChallengeRecord(raw)
+	if err != nil || !now.Before(record.ExpiresAt) {
 		_ = os.Remove(g.challengePath(challenge))
-		return time.Time{}, false
+		return enrollmentChallenge{}, false
 	}
 	if g.challenges == nil {
-		g.challenges = map[string]time.Time{}
+		g.challenges = map[string]enrollmentChallenge{}
 	}
-	g.challenges[challenge] = expires
-	return expires, true
+	g.challenges[challenge] = record
+	return record, true
 }
 
 func (g *gateway) challengeValid(challenge string) bool {
@@ -188,6 +227,10 @@ func (g *gateway) challengeValid(challenge string) bool {
 }
 
 func (g *gateway) newChallenge() (string, error) {
+	return g.newNamedChallenge("")
+}
+
+func (g *gateway) newNamedChallenge(name string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -207,8 +250,8 @@ func (g *gateway) newChallenge() (string, error) {
 		}
 		path := filepath.Join(dir, entry.Name())
 		raw, readErr := os.ReadFile(path)
-		expires, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(raw)))
-		if readErr != nil || parseErr != nil || !now.Before(expires) {
+		record, parseErr := parseChallengeRecord(raw)
+		if readErr != nil || parseErr != nil || !now.Before(record.ExpiresAt) {
 			_ = os.Remove(path)
 			continue
 		}
@@ -219,10 +262,14 @@ func (g *gateway) newChallenge() (string, error) {
 	}
 
 	challenge := randomHex(24)
-	expires := now.Add(challengeTTL).UTC()
+	record := enrollmentChallenge{ExpiresAt: now.Add(challengeTTL).UTC(), Name: normalizeDeviceName(name)}
 	path := g.challengePath(challenge)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(expires.Format(time.RFC3339Nano)+"\n"), 0600); err != nil {
+	rawRecord, err := json.Marshal(record)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(tmp, rawRecord, 0600); err != nil {
 		return "", err
 	}
 	if err := os.Rename(tmp, path); err != nil {
@@ -230,9 +277,9 @@ func (g *gateway) newChallenge() (string, error) {
 		return "", err
 	}
 	if g.challenges == nil {
-		g.challenges = map[string]time.Time{}
+		g.challenges = map[string]enrollmentChallenge{}
 	}
-	g.challenges[challenge] = expires
+	g.challenges[challenge] = record
 	return challenge, nil
 }
 
@@ -264,7 +311,12 @@ func (g *gateway) signProfile(ctx context.Context, profile []byte) ([]byte, erro
 }
 
 func (g *gateway) profile(w http.ResponseWriter, r *http.Request) {
-	challenge, err := g.newChallenge()
+	if err := r.ParseForm(); err != nil {
+		fail(w, http.StatusBadRequest, "设备名称无效")
+		return
+	}
+	name := normalizeDeviceName(r.FormValue("name"))
+	challenge, err := g.newNamedChallenge(name)
 	if err != nil {
 		fail(w, http.StatusTooManyRequests, "登记请求过多，请稍后再试")
 		return
@@ -275,7 +327,7 @@ func (g *gateway) profile(w http.ResponseWriter, r *http.Request) {
 	profile := []byte(fmt.Sprintf(
 		"<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\"><plist version=\"1.0\"><dict>"+
 			"<key>PayloadContent</key><dict><key>URL</key><string>%s</string><key>DeviceAttributes</key><array><string>UDID</string><string>PRODUCT</string><string>VERSION</string></array><key>Challenge</key><string>%s</string></dict>"+
-			"<key>PayloadOrganization</key><string>ILS</string><key>PayloadDisplayName</key><string>ILS 设备信息收集</string><key>PayloadDescription</key><string>仅收集 UDID、设备型号与系统版本供管理员登记 Ad Hoc 测试设备。不会安装根证书或 MDM。</string>"+
+			"<key>PayloadOrganization</key><string>ILS</string><key>PayloadDisplayName</key><string>ILS 设备信息收集</string><key>PayloadDescription</key><string>仅收集设备名称、UDID、设备型号与系统版本供管理员登记 Ad Hoc 测试设备。不会安装根证书或 MDM。</string>"+
 			"<key>PayloadVersion</key><integer>1</integer><key>PayloadUUID</key><string>%s</string><key>PayloadIdentifier</key><string>local.ioant.ils.enrollment.%s</string><key>PayloadType</key><string>Profile Service</string></dict></plist>",
 		callback, challenge, uuid, uuid,
 	))
@@ -330,17 +382,23 @@ func parsePlistStrings(raw []byte) (map[string]string, error) {
 	return values, nil
 }
 
-func (g *gateway) consumeChallenge(challenge string) bool {
+func (g *gateway) consumeChallengeRecord(challenge string) (enrollmentChallenge, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if _, ok := g.loadChallengeLocked(challenge); !ok {
-		return false
+	record, ok := g.loadChallengeLocked(challenge)
+	if !ok {
+		return enrollmentChallenge{}, false
 	}
 	if err := os.Remove(g.challengePath(challenge)); err != nil {
-		return false
+		return enrollmentChallenge{}, false
 	}
 	delete(g.challenges, challenge)
-	return true
+	return record, true
+}
+
+func (g *gateway) consumeChallenge(challenge string) bool {
+	_, ok := g.consumeChallengeRecord(challenge)
+	return ok
 }
 
 func (g *gateway) callback(w http.ResponseWriter, r *http.Request) {
@@ -369,7 +427,8 @@ func (g *gateway) callback(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "设备 UDID 或登记凭证无效")
 		return
 	}
-	if !g.consumeChallenge(challenge) {
+	challengeRecord, ok := g.consumeChallengeRecord(challenge)
+	if !ok {
 		fail(w, http.StatusGone, "登记链接已使用或过期")
 		return
 	}
@@ -379,6 +438,7 @@ func (g *gateway) callback(w http.ResponseWriter, r *http.Request) {
 	device := pendingDevice{
 		ID:          id,
 		UDID:        fields["UDID"],
+		Name:        challengeRecord.Name,
 		Product:     fields["PRODUCT"],
 		Version:     fields["VERSION"],
 		CollectedAt: time.Now().UTC(),
@@ -476,7 +536,7 @@ func main() {
 		profileSigningCert: strings.TrimSpace(*profileSigningCert),
 		profileSigningKey:  strings.TrimSpace(*profileSigningKey),
 		profileSigningCA:   strings.TrimSpace(*profileSigningCA),
-		challenges:         map[string]time.Time{},
+		challenges:         map[string]enrollmentChallenge{},
 	}
 	if (g.profileSigningCert == "") != (g.profileSigningKey == "") {
 		log.Fatal("profile-signing-cert and profile-signing-key must be provided together")
@@ -492,6 +552,7 @@ func main() {
 	mux.HandleFunc("GET /_ils/health", g.health)
 	mux.HandleFunc("GET /enroll", g.enrollPage)
 	mux.HandleFunc("GET /enroll.mobileconfig", g.profile)
+	mux.HandleFunc("POST /enroll.mobileconfig", g.profile)
 	mux.HandleFunc("POST /device/callback/{challenge}", g.callback)
 	mux.HandleFunc("GET /api/ils/devices/pending", g.pending)
 	mux.HandleFunc("POST /api/ils/devices/{id}/ack", g.ack)
