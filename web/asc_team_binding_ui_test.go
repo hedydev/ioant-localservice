@@ -30,7 +30,7 @@ func TestAppStoreConnectTeamBindingUI(t *testing.T) {
 	for _, required := range []string{
 		"/api/app-store-connect/team-binding",
 		"ascTeamBinding.team_id",
-		"设备注册已禁用",
+		"请先配置 App Store Connect API Key 并绑定 Apple Team",
 		"当前设备 Team 与 App Store Connect API Key 绑定 Team 不一致",
 	} {
 		if !strings.Contains(servicesJS, required) {
