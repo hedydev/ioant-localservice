@@ -20,6 +20,8 @@ func TestServicesManagementLayout(t *testing.T) {
 		"device-registry-table-wrap",
 		"<table class=\"device-registry-table\"",
 		"<th>设备</th><th>系统 / 来源</th><th>UDID</th><th>Apple Team</th><th>Apple 注册状态</th><th>操作</th>",
+		"String(device.name||'').trim()",
+		"再次通过 ota.ioant.com 登记可设置设备名称",
 		"data-apple-register",
 		"刷新 Apple 状态",
 	} {
