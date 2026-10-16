@@ -28,7 +28,7 @@ func TestSettingsThemeIntegration(t *testing.T) {
 	}
 	router := string(routerRaw)
 	for _, required := range []string{
-		"globalViews=new Set(['services','settings'])",
+		"globalViews=new Set(['services','apple','settings'])",
 		"if(globalViews.has(view))return '#/'+view",
 	} {
 		if !strings.Contains(router, required) {
