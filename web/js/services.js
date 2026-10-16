@@ -7,6 +7,15 @@ let signingTeams=[];
 let devices=[];
 let ascTeamBinding=null;
 
+function ensureServicesStyle(){
+ if(document.querySelector('link[data-ils-services-style]'))return;
+ const link=document.createElement('link');
+ link.rel='stylesheet';
+ link.href='/services.css?v=20261016-table';
+ link.dataset.ilsServicesStyle='1';
+ document.head.appendChild(link);
+}
+
 function isIOSDevice(){
  const ua=navigator.userAgent||'';
  if(/iPhone|iPad|iPod/i.test(ua))return true;
@@ -313,6 +322,7 @@ function resetGlobalServices(){
 }
 
 export function initServices(){
+ ensureServicesStyle();
  ensureServicesLayout();
  updateEnrollmentVisibility();
  ensureDeviceListContainer();
