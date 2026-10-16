@@ -156,8 +156,12 @@ function renderDevices(){
  }
  const rows=devices.map(device=>{
   const context=deviceRegistrationContext(device);
+  const friendlyName=String(device.name||'').trim();
+  const product=String(device.product||'iOS Device').trim()||'iOS Device';
+  const primaryName=friendlyName||product;
+  const secondaryName=friendlyName?product:'再次通过 ota.ioant.com 登记可设置设备名称';
   return '<tr>'+ 
-   '<td class="device-name-cell"><div class="device-name-line"><strong>'+escapeHTML(device.product||'iOS Device')+'</strong><span class="badge">'+escapeHTML(device.status||'pending_apple_registration')+'</span></div></td>'+ 
+   '<td class="device-name-cell"><div class="device-name-line"><strong>'+escapeHTML(primaryName)+'</strong><span class="badge">'+escapeHTML(device.status||'pending_apple_registration')+'</span></div><small>'+escapeHTML(secondaryName)+'</small></td>'+ 
    '<td><strong class="device-secondary">iOS '+escapeHTML(device.version||'—')+'</strong><small>'+escapeHTML(sourceName(device.source))+'</small></td>'+ 
    '<td><code class="device-udid">'+escapeHTML(device.udid)+'</code></td>'+ 
    '<td>'+deviceTeamCell(device)+'</td>'+ 
