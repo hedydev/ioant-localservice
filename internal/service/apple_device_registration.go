@@ -36,6 +36,9 @@ func appleRegistrationStatus(status string) string {
 }
 
 func appleDeviceDisplayName(d Device) string {
+	if name := strings.TrimSpace(d.Name); name != "" {
+		return name
+	}
 	product := strings.TrimSpace(d.Product)
 	if product == "" {
 		product = "iOS Device"
