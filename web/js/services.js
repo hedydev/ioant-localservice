@@ -14,6 +14,18 @@ function isIOSDevice(){
  return navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1;
 }
 
+function ensureServicesLayout(){
+ const view=$('#view-services');
+ const gateway=$('#ota-gateway-status')?.closest('article.panel-card');
+ const deviceList=$('#devices-list');
+ const devicesCard=deviceList?.closest('article.panel-card');
+ const heading=view?.querySelector(':scope > .view-heading');
+ if(!view||!gateway||!devicesCard||!heading)return;
+ gateway.classList.add('ota-gateway-card');
+ devicesCard.classList.add('device-management-card');
+ heading.after(gateway);
+}
+
 function updateEnrollmentVisibility(){
  const link=$('#enroll-device-link');
  const card=link?.closest('article');
@@ -80,24 +92,50 @@ function ensureDeviceListContainer(){
  if(!current||current.tagName!=='PRE')return current;
  const replacement=document.createElement('div');
  replacement.id='devices-list';
- replacement.className='device-registry-list';
+ replacement.className='device-registry-table-wrap';
  current.replaceWith(replacement);
  return replacement;
 }
 
-function deviceRegistrationActions(device){
+function deviceRegistrationContext(device){
+ const registrations=device.apple_registrations||{};
+ const registeredTeams=Object.values(registrations).filter(item=>item&&item.status==='registered');
+ const boundTeamID=ascTeamBinding?.configured?ascTeamBinding.team_id:'';
+ const boundRegistration=boundTeamID?registrations[boundTeamID]||null:null;
+ const summary=boundRegistration
+  ?'Team '+boundTeamID+' · '+registrationLabel(boundRegistration)
+  :registeredTeams.length
+   ?registeredTeams.map(item=>'Team '+item.team_id+' · '+registrationLabel(item)).join('；')
+   :'尚未注册到 Apple Developer Team';
+ const statusClass=(boundRegistration?.status==='registered'||registeredTeams.length)
+  ?'config-ok'
+  :device.status==='apple_registration_attention'||boundRegistration?.status==='failed'
+   ?'config-error'
+   :'config-warning';
+ return {registrations,boundRegistration,summary,statusClass};
+}
+
+function deviceTeamCell(device){
  if(!ascTeamBinding?.configured){
-  const message=ascTeamBinding?.message||'请先在 App Store Connect 配置中绑定 Apple Team。';
-  return '<p class="config-warning">'+escapeHTML(message)+' 设备注册已禁用。</p>';
+  return '<span class="device-table-warning">未绑定 Apple Team</span>';
  }
  const team=boundSigningTeam();
  if(!team){
-  return '<p class="config-warning">当前 API Key 绑定 Apple Team '+escapeHTML(ascTeamBinding.team_id)+'，但这台 Mac 没有检测到该 Team 的代码签名身份；设备注册已禁用。</p>';
+  return '<span class="device-table-warning">'+escapeHTML(ascTeamBinding.team_id)+'<small>本机无签名身份</small></span>';
  }
- return '<div class="persistent-config-actions">'+
-  '<label>Apple Team<select data-device-team="'+escapeHTML(device.udid)+'" disabled><option value="'+escapeHTML(team.id)+'" selected>'+escapeHTML(teamLabel(team))+'</option></select></label>'+
-  '<button type="button" data-apple-register="'+escapeHTML(device.udid)+'">注册到 Apple / 刷新状态</button>'+
- '</div>';
+ return '<select class="device-team-select" data-device-team="'+escapeHTML(device.udid)+'" disabled aria-label="Apple Team"><option value="'+escapeHTML(team.id)+'" selected>'+escapeHTML(teamLabel(team))+'</option></select>';
+}
+
+function deviceActionCell(device,registration){
+ if(!ascTeamBinding?.configured){
+  return '<button type="button" class="device-action" disabled title="请先配置 App Store Connect API Key 并绑定 Apple Team">注册到 Apple</button>';
+ }
+ const team=boundSigningTeam();
+ if(!team){
+  return '<button type="button" class="device-action" disabled title="当前绑定 Team 在这台 Mac 上没有可用签名身份">注册到 Apple</button>';
+ }
+ const label=registration?.status==='registered'?'刷新 Apple 状态':'注册到 Apple';
+ return '<button type="button" class="device-action" data-apple-register="'+escapeHTML(device.udid)+'">'+label+'</button>';
 }
 
 function renderDevices(){
@@ -107,22 +145,21 @@ function renderDevices(){
   container.innerHTML='<div class="persistent-config-empty"><strong>还没有登记设备</strong>新设备从公网 OTA Gateway 同步后会出现在这里。</div>';
   return;
  }
- container.innerHTML=devices.map(device=>{
-  const registrations=device.apple_registrations||{};
-  const registeredTeams=Object.values(registrations).filter(item=>item&&item.status==='registered');
-  const summary=registeredTeams.length
-   ?registeredTeams.map(item=>'Team '+item.team_id+' · '+registrationLabel(item)).join('；')
-   :'尚未注册到 Apple Developer Team';
-  const statusClass=registeredTeams.length?'config-ok':device.status==='apple_registration_attention'?'config-error':'config-warning';
-  return '<div class="release">'+
-   '<div class="section-heading"><div><h2>'+escapeHTML(device.product||'iOS Device')+'</h2><span class="meta">iOS '+escapeHTML(device.version||'')+' · '+escapeHTML(sourceName(device.source))+'</span></div><span class="badge">'+escapeHTML(device.status||'pending_apple_registration')+'</span></div>'+
-   '<div class="persistent-config-grid">'+
-    '<span><small>UDID</small><strong>'+escapeHTML(device.udid)+'</strong></span>'+
-    '<span><small>Apple 注册状态</small><strong class="'+statusClass+'">'+escapeHTML(summary)+'</strong></span>'+
-   '</div>'+deviceRegistrationActions(device)+
-   '<p class="meta">Apple 注册只能使用当前 App Store Connect API Key 已绑定的 Apple Team；请让它与后续 Ad Hoc Release Profile 的 Apple Team 保持一致。</p>'+
-  '</div>';
+ const rows=devices.map(device=>{
+  const context=deviceRegistrationContext(device);
+  return '<tr>'+ 
+   '<td class="device-name-cell"><div class="device-name-line"><strong>'+escapeHTML(device.product||'iOS Device')+'</strong><span class="badge">'+escapeHTML(device.status||'pending_apple_registration')+'</span></div></td>'+ 
+   '<td><strong class="device-secondary">iOS '+escapeHTML(device.version||'—')+'</strong><small>'+escapeHTML(sourceName(device.source))+'</small></td>'+ 
+   '<td><code class="device-udid">'+escapeHTML(device.udid)+'</code></td>'+ 
+   '<td>'+deviceTeamCell(device)+'</td>'+ 
+   '<td><strong class="device-registration-status '+context.statusClass+'">'+escapeHTML(context.summary)+'</strong></td>'+ 
+   '<td class="device-action-cell">'+deviceActionCell(device,context.boundRegistration)+'</td>'+ 
+  '</tr>';
  }).join('');
+ container.innerHTML='<table class="device-registry-table" aria-label="注册设备列表">'+
+  '<thead><tr><th>设备</th><th>系统 / 来源</th><th>UDID</th><th>Apple Team</th><th>Apple 注册状态</th><th>操作</th></tr></thead>'+ 
+  '<tbody>'+rows+'</tbody>'+ 
+ '</table>';
 }
 
 async function loadSigningTeams(){
@@ -276,6 +313,7 @@ function resetGlobalServices(){
 }
 
 export function initServices(){
+ ensureServicesLayout();
  updateEnrollmentVisibility();
  ensureDeviceListContainer();
 
