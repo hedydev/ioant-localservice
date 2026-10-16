@@ -15,7 +15,7 @@ func TestGlobalSettingsOwnServiceConfiguration(t *testing.T) {
 		"全局设置",
 		"这些配置不属于任何单个项目",
 		"global-settings-button",
-		"data.globalView='settings'",
+		"dataset.globalView='settings'",
 		"relocateGlobalConfiguration",
 		"#asc-status",
 		"App Store Connect / Apple Developer",
