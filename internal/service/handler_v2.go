@@ -72,7 +72,7 @@ func (a *App) HandlerV2() http.Handler {
 	mux.HandleFunc("POST /api/projects/{project}/builds", a.startLocalCheckoutBuild)
 	mux.HandleFunc("POST /api/projects/{project}/internal-builds", a.startPackageOnlyBuild)
 	mux.HandleFunc("GET /api/projects/{project}/builds", a.buildJobsLocal)
-	mux.HandleFunc("DELETE /api/builds/{job}", a.deleteBuildRecord)
+	mux.HandleFunc("DELETE /api/builds/{job}", a.deleteBuildRecordCascade)
 	mux.HandleFunc("GET /api/builds/{job}/log", a.buildLogView)
 	mux.HandleFunc("GET /api/builds/{job}/artifact", a.downloadPackageOnlyArtifact)
 	mux.HandleFunc("POST /api/builds/{job}/simulator-install", a.installSimulatorBuild)
