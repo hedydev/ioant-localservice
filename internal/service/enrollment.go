@@ -33,6 +33,8 @@ type Device struct {
 	Product            string                             `json:"product"`
 	Version            string                             `json:"version"`
 	CollectedAt        time.Time                          `json:"collected_at"`
+	RegisteredAt       time.Time                          `json:"registered_at"`
+	UpdatedAt          time.Time                          `json:"updated_at"`
 	Status             string                             `json:"status"`
 	IdentityVerified   bool                               `json:"identity_verified"`
 	Source             string                             `json:"source,omitempty"`
@@ -40,6 +42,18 @@ type Device struct {
 }
 
 var udidRE = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{8}-[0-9a-fA-F]{16})$`)
+
+func normalizeDeviceTimes(d *Device) {
+	if d == nil {
+		return
+	}
+	if d.RegisteredAt.IsZero() {
+		d.RegisteredAt = d.CollectedAt
+	}
+	if d.UpdatedAt.IsZero() {
+		d.UpdatedAt = d.CollectedAt
+	}
+}
 
 func (a *App) enrollmentProfile(w http.ResponseWriter, r *http.Request) {
 	if a.publicURL == "" {
@@ -66,7 +80,7 @@ func (a *App) enrollmentProfile(w http.ResponseWriter, r *http.Request) {
 	uuid = uuid[:8] + "-" + uuid[8:12] + "-" + uuid[12:16] + "-" + uuid[16:20] + "-" + uuid[20:]
 	w.Header().Set("Content-Type", "application/x-apple-aspen-config")
 	w.Header().Set("Content-Disposition", `attachment; filename="localservice-device.mobileconfig"`)
-	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>PayloadContent</key><dict><key>URL</key><string>%s</string><key>DeviceAttributes</key><array><string>UDID</string><string>PRODUCT</string><string>VERSION</string></array><key>Challenge</key><string>%s</string></dict><key>PayloadOrganization</key><string>Localservice</string><key>PayloadDisplayName</key><string>Localservice 设备信息收集</string><key>PayloadDescription</key><string>仅收集 UDID、设备型号与系统版本供管理员登记测试设备。不会安装根证书、MDM 或授予应用签名权限。</string><key>PayloadVersion</key><integer>1</integer><key>PayloadUUID</key><string>%s</string><key>PayloadIdentifier</key><string>local.ioant.localservice.enrollment.%s</string><key>PayloadType</key><string>Profile Service</string></dict></plist>`, escapeXML(a.publicURL+"/api/devices/callback/"+challenge), challenge, uuid, uuid)
+	fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD Plist 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>PayloadContent</key><dict><key>URL</key><string>%s</string><key>DeviceAttributes</key><array><string>UDID</string><string>PRODUCT</string><string>VERSION</string></array><key>Challenge</key><string>%s</string></dict><key>PayloadOrganization</key><string>Localservice</string><key>PayloadDisplayName</key><string>Localservice 设备信息收集</string><key>PayloadDescription</key><string>仅收集 UDID、设备型号与系统版本供管理员登记测试设备。不会安装根证书、MDM 或授予应用签名权限。</string><key>PayloadVersion</key><integer>1</integer><key>PayloadUUID</key><string>%s</string><key>PayloadIdentifier</key><string>local.ioant.localservice.enrollment.%s</string><key>PayloadType</key><string>Profile Service</string></dict></plist>`, escapeXML(a.publicURL+"/api/devices/callback/"+challenge), challenge, uuid, uuid)
 }
 func (a *App) enrollmentCallback(w http.ResponseWriter, r *http.Request) {
 	challenge := r.PathValue("challenge")
@@ -144,6 +158,7 @@ func (a *App) saveDeviceRecord(d Device) (bool, error) {
 		if raw, readErr := os.ReadFile(path); readErr == nil {
 			var current Device
 			if json.Unmarshal(raw, &current) == nil {
+				normalizeDeviceTimes(&current)
 				if len(d.AppleRegistrations) == 0 && len(current.AppleRegistrations) > 0 {
 					d.AppleRegistrations = current.AppleRegistrations
 				}
@@ -156,12 +171,22 @@ func (a *App) saveDeviceRecord(d Device) (bool, error) {
 				if d.CollectedAt.IsZero() {
 					d.CollectedAt = current.CollectedAt
 				}
+				if !current.RegisteredAt.IsZero() {
+					d.RegisteredAt = current.RegisteredAt
+				}
 			}
 		}
 	}
 	if d.Source == "" {
 		d.Source = "legacy"
 	}
+	if d.RegisteredAt.IsZero() {
+		d.RegisteredAt = d.CollectedAt
+		if d.RegisteredAt.IsZero() {
+			d.RegisteredAt = time.Now().UTC()
+		}
+	}
+	d.UpdatedAt = time.Now().UTC()
 	if deviceHasRegisteredAppleTeam(d) {
 		d.Status = "apple_registered"
 	}
@@ -187,6 +212,7 @@ func (a *App) readDeviceRecord(udid string) (Device, error) {
 	if e = json.Unmarshal(raw, &d); e != nil {
 		return d, fmt.Errorf("设备记录损坏")
 	}
+	normalizeDeviceTimes(&d)
 	if d.AppleRegistrations == nil {
 		d.AppleRegistrations = map[string]AppleDeviceRegistration{}
 	}
@@ -208,6 +234,7 @@ func (a *App) listDevices(w http.ResponseWriter, r *http.Request) {
 		}
 		var d Device
 		if json.Unmarshal(raw, &d) == nil {
+			normalizeDeviceTimes(&d)
 			devices = append(devices, d)
 		}
 	}
