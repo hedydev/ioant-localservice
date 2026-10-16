@@ -302,14 +302,14 @@ export function initAppStoreConnect(){
 
  window.addEventListener('admin-cleared',clearConfigUI);
  window.addEventListener('admin-loaded',()=>{
-  if(state.view==='settings')loadConfig();
+  if(state.view==='apple')loadConfig();
  });
  window.addEventListener('view-changed',event=>{
-  if(event.detail.view==='settings'&&state.admin)loadConfig();
+  if(event.detail.view==='apple'&&state.admin)loadConfig();
  });
 
  setInterval(()=>{
-  if(document.hidden||!state.admin||state.view!=='settings')return;
+  if(document.hidden||!state.admin||state.view!=='apple')return;
   loadConfig();
  },10000);
 }
