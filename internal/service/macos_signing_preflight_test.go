@@ -1,33 +1,56 @@
 package service
 
 import (
+	"crypto/x509"
 	"strings"
 	"testing"
 )
 
-func TestParseAppleDevelopmentIdentities(t *testing.T) {
-	raw := []byte(`  1) AAA "Apple Development: Ted Example (64RS366WKG)"
-  2) BBB "Apple Distribution: Ted Example (64RS366WKG)"
-  3) CCC "Developer ID Application: Ted Example (64RS366WKG)"
-  4) DDD "Apple Development: Other Example (ABCDEFGHIJ)"
-     4 valid identities found
+func TestParseCodeSigningIdentityRefs(t *testing.T) {
+	raw := []byte(`  1) 6CEF17A0296FD73CF917262BA1B4B3BD665CC3E8 "Apple Development: ao bing (CC9PUAE5N3)"
+  2) 0123456789ABCDEF0123456789ABCDEF01234567 "Apple Distribution: Bing Ao (64RS366WKG)"
+     2 valid identities found
 `)
-	got := parseAppleDevelopmentIdentities(raw)
+	got := parseCodeSigningIdentityRefs(raw)
 	if len(got) != 2 {
-		t.Fatalf("development identities = %d, want 2: %#v", len(got), got)
+		t.Fatalf("identity refs = %d, want 2: %#v", len(got), got)
 	}
-	if got[0].TeamID != "64RS366WKG" || !strings.HasPrefix(got[0].Identity, "Apple Development:") {
+	if got[0].Hash != "6CEF17A0296FD73CF917262BA1B4B3BD665CC3E8" || got[0].Identity != "Apple Development: ao bing (CC9PUAE5N3)" {
 		t.Fatalf("first identity = %#v", got[0])
 	}
-	if got[1].TeamID != "ABCDEFGHIJ" || !strings.HasPrefix(got[1].Identity, "Apple Development:") {
-		t.Fatalf("second identity = %#v", got[1])
+}
+
+func TestAppleCertificateTeamIDUsesOrganizationalUnit(t *testing.T) {
+	cert := &x509.Certificate{}
+	cert.Subject.OrganizationalUnit = []string{"64RS366WKG"}
+	if got := appleCertificateTeamID(cert); got != "64RS366WKG" {
+		t.Fatalf("team = %q", got)
+	}
+}
+
+func TestAppleDevelopmentSigningsUseCertificateTeamNotCommonNameSuffix(t *testing.T) {
+	got := appleDevelopmentSignings([]codeSigningIdentity{
+		{
+			Hash:     "6CEF17A0296FD73CF917262BA1B4B3BD665CC3E8",
+			Identity: "Apple Development: ao bing (CC9PUAE5N3)",
+			TeamID:   "64RS366WKG",
+		},
+	})
+	if len(got) != 1 {
+		t.Fatalf("development identities = %d, want 1: %#v", len(got), got)
+	}
+	if got[0].TeamID != "64RS366WKG" {
+		t.Fatalf("team = %q, want certificate OU team", got[0].TeamID)
+	}
+	if got[0].Identity != "Apple Development: ao bing (CC9PUAE5N3)" {
+		t.Fatalf("identity = %q", got[0].Identity)
 	}
 }
 
 func TestSelectMacOSDevelopmentSigningPreferredTeam(t *testing.T) {
 	identities := []macOSDevelopmentSigning{
-		{TeamID: "64RS366WKG", Identity: "Apple Development: Ted Example (64RS366WKG)"},
-		{TeamID: "ABCDEFGHIJ", Identity: "Apple Development: Other Example (ABCDEFGHIJ)"},
+		{TeamID: "64RS366WKG", Identity: "Apple Development: ao bing (CC9PUAE5N3)"},
+		{TeamID: "ABCDEFGHIJ", Identity: "Apple Development: Other Example (OTHER12345)"},
 	}
 	got, err := selectMacOSDevelopmentSigning(identities, "64rs366wkg")
 	if err != nil {
@@ -40,7 +63,7 @@ func TestSelectMacOSDevelopmentSigningPreferredTeam(t *testing.T) {
 
 func TestSelectMacOSDevelopmentSigningRejectsMissingPreferredTeam(t *testing.T) {
 	_, err := selectMacOSDevelopmentSigning([]macOSDevelopmentSigning{
-		{TeamID: "ABCDEFGHIJ", Identity: "Apple Development: Other Example (ABCDEFGHIJ)"},
+		{TeamID: "ABCDEFGHIJ", Identity: "Apple Development: Other Example (OTHER12345)"},
 	}, "64RS366WKG")
 	if err == nil || !strings.Contains(err.Error(), "Team 64RS366WKG") {
 		t.Fatalf("error = %v", err)
@@ -49,8 +72,8 @@ func TestSelectMacOSDevelopmentSigningRejectsMissingPreferredTeam(t *testing.T) 
 
 func TestSelectMacOSDevelopmentSigningRejectsAmbiguousTeam(t *testing.T) {
 	_, err := selectMacOSDevelopmentSigning([]macOSDevelopmentSigning{
-		{TeamID: "64RS366WKG", Identity: "Apple Development: Ted Example (64RS366WKG)"},
-		{TeamID: "ABCDEFGHIJ", Identity: "Apple Development: Other Example (ABCDEFGHIJ)"},
+		{TeamID: "64RS366WKG", Identity: "Apple Development: ao bing (CC9PUAE5N3)"},
+		{TeamID: "ABCDEFGHIJ", Identity: "Apple Development: Other Example (OTHER12345)"},
 	}, "")
 	if err == nil || !strings.Contains(err.Error(), "多个 Apple Development Team") {
 		t.Fatalf("error = %v", err)
