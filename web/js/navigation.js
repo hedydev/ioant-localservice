@@ -2,7 +2,7 @@ import {$,state} from './core.js';
 import {readRoute,writeRoute,validViews,globalViews} from './router.js';
 import {selectProject} from './projects.js';
 
-const adminViews=new Set(['services','builds','automation']);
+const adminViews=new Set(['services','apple','builds','automation']);
 const labels={overview:'项目概览',builds:'构建与发布',releases:'版本历史',ios:'iOS 发布',automation:'自动化 / API'};
 
 function isGlobalView(view){return globalViews.has(view);}
