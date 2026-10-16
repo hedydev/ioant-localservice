@@ -38,29 +38,16 @@ function ensureThemeStyle(){
 }
 
 function ensureSettingsNavigation(){
- if(!$('#settings-button')){
-  const button=document.createElement('button');
-  button.id='settings-button';
-  button.type='button';
-  button.className='quiet';
-  button.setAttribute('aria-label','打开全局设置');
-  button.textContent='全局设置';
-  const adminButton=$('#admin-button');
-  if(adminButton)adminButton.before(button);
-  else document.querySelector('.header-actions')?.appendChild(button);
- }
-
- if(!$('#global-settings-button')){
-  const nav=$('#global-services-nav');
-  if(nav){
-   const button=document.createElement('button');
-   button.id='global-settings-button';
-   button.type='button';
-   button.dataset.globalView='settings';
-   button.innerHTML='全局设置<small>服务级配置</small>';
-   nav.appendChild(button);
-  }
- }
+ if($('#settings-button'))return;
+ const button=document.createElement('button');
+ button.id='settings-button';
+ button.type='button';
+ button.className='quiet';
+ button.setAttribute('aria-label','打开设置');
+ button.textContent='设置';
+ const adminButton=$('#admin-button');
+ if(adminButton)adminButton.before(button);
+ else document.querySelector('.header-actions')?.appendChild(button);
 }
 
 function ensureSettingsShell(){
@@ -72,16 +59,9 @@ function ensureSettingsShell(){
  section.hidden=true;
  section.innerHTML=`
    <div class="view-heading">
-     <div><h2>全局设置</h2><p>管理 ILS 服务级配置和当前浏览器偏好；这些配置不属于任何单个项目。</p></div>
+     <div><h2>设置</h2><p>管理当前浏览器的 ILS 界面偏好。服务级 Apple / OTA 配置使用左侧独立菜单。</p></div>
    </div>
    <div class="settings-grid">
-     <article class="panel-card settings-card" data-admin hidden>
-       <div class="section-heading">
-         <div><h2>设备与 OTA</h2><span class="meta">ILS global services</span></div>
-         <button type="button" data-go-view="services">打开设备与 OTA</button>
-       </div>
-       <p>Device Registry、Apple 设备登记和 OTA Gateway 都是 ILS 全局能力，所有项目共享。</p>
-     </article>
      <article class="panel-card settings-card">
        <div class="section-heading">
          <div><h2>外观</h2><span class="meta">Theme</span></div>
@@ -105,38 +85,17 @@ function ensureSettingsShell(){
  document.querySelector('main')?.insertBefore(section,document.querySelector('main > footer'));
 }
 
-function relocateGlobalConfiguration(){
- const grid=$('#view-settings .settings-grid');
- const status=$('#asc-status');
- const card=status?.closest('article.panel-card');
- if(!grid||!card)return;
-
- card.classList.add('settings-card','global-settings-card');
- card.dataset.globalSettingsCard='app-store-connect';
- const heading=card.querySelector('.section-heading h2');
- const headingMeta=card.querySelector('.section-heading .meta');
- const description=card.querySelector(':scope > p');
- if(heading)heading.textContent='App Store Connect / Apple Developer';
- if(headingMeta)headingMeta.textContent='全局 · TestFlight / 设备注册';
- if(description)description.textContent='这一套 API Key、Apple Team 绑定与状态同步由整个 ILS 共用；项目只保存各自的 Release Profile 和发布记录。';
- grid.prepend(card);
-}
-
 function syncSettingsSelection(){
  applyTheme(document.documentElement.dataset.theme||storedTheme(),{persist:false});
  const active=state.view==='settings';
  $('#settings-button')?.classList.toggle('active',active);
  $('#settings-button')?.setAttribute('aria-pressed',String(active));
- $('#global-settings-button')?.classList.toggle('active',active);
- if(active)$('#global-settings-button')?.setAttribute('aria-current','page');
- else $('#global-settings-button')?.removeAttribute('aria-current');
 }
 
 export function initSettings(){
  ensureThemeStyle();
  ensureSettingsNavigation();
  ensureSettingsShell();
- relocateGlobalConfiguration();
  applyTheme(document.documentElement.dataset.theme||storedTheme(),{persist:false});
 
  $('#settings-button').onclick=()=>activateView('settings');
@@ -152,8 +111,5 @@ export function initSettings(){
  });
  syncSettingsSelection();
 
- // Settings and navigation are optional modules initialized independently.
- // Re-apply the active view once this panel exists so a direct #/settings URL
- // still works regardless of module load order.
  if(state.view==='settings')activateView('settings',{updateRoute:false});
 }
