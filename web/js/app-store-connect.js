@@ -64,7 +64,11 @@ function renderTeamOptions(selected=''){
  }
  select.innerHTML=options.join('');
  const wanted=selected||currentTeamBinding?.team_id||'';
- if(wanted&&localSigningTeams.some(team=>team.id===wanted))select.value=wanted;
+ if(wanted&&localSigningTeams.some(team=>team.id===wanted)){
+  select.value=wanted;
+ }else if(!wanted&&localSigningTeams.length===1){
+  select.value=localSigningTeams[0].id;
+ }
 }
 
 function populateConfigForm(status=currentStatus,binding=currentTeamBinding){
@@ -189,15 +193,17 @@ async function saveConfig(form){
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify(Object.fromEntries(new FormData(form)))
   });
-  let binding=currentTeamBinding;
+  let binding;
   if(teamID){
    binding=await api('/api/app-store-connect/team-binding',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({team_id:teamID})
    });
-   currentTeamBinding=binding;
+  }else{
+   binding=await api('/api/app-store-connect/team-binding').catch(()=>null);
   }
+  currentTeamBinding=binding;
   renderStatus(status,binding);
   window.dispatchEvent(new CustomEvent('asc-team-binding-changed',{detail:{binding}}));
   if(status.connected){
@@ -205,11 +211,12 @@ async function saveConfig(form){
    try{
     const result=await refreshStatus({announce:false});
     const warning=result.reconciliation_warning||result.warning;
+    const teamPhrase=teamID?'，Apple Team '+teamID+' 已绑定':'';
     notice(warning
-     ?'App Store Connect API 已连接；Apple Team '+teamID+' 已绑定；发布状态已刷新，但存在警告：'+warning
-     :'App Store Connect API 已连接，Apple Team '+teamID+' 已绑定，并已同步 TestFlight 发布状态。',warning?'warning':'success',6500);
+     ?'App Store Connect API 已连接'+teamPhrase+'；发布状态已刷新，但存在警告：'+warning
+     :'App Store Connect API 已连接'+teamPhrase+'，并已同步 TestFlight 发布状态。',warning?'warning':'success',6500);
    }catch{
-    notice('App Store Connect API 已连接，Apple Team 已绑定，但发布状态同步失败；请查看状态。','warning',6500);
+    notice('App Store Connect API 已连接'+(teamID?'，Apple Team 已绑定':'')+'，但发布状态同步失败；请查看状态。','warning',6500);
    }
   }else{
    $('#asc-dialog-status').textContent='配置已保存，但连接验证未通过；请检查 Key、Issuer ID、Apple Team 和私钥路径。';
