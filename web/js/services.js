@@ -11,7 +11,7 @@ function ensureServicesStyle(){
  if(document.querySelector('link[data-ils-services-style]'))return;
  const link=document.createElement('link');
  link.rel='stylesheet';
- link.href='/services.css?v=20261016-table';
+ link.href='/services.css?v=20261016-times';
  link.dataset.ilsServicesStyle='1';
  document.head.appendChild(link);
 }
@@ -71,6 +71,16 @@ async function checkEnrollmentAvailability(){
 
 function sourceName(source){
  return source==='public_ota_gateway'?'公网 OTA Gateway':source==='local_ils'?'本地 ILS':'历史登记';
+}
+
+function formatLocalTime(value){
+ if(!value)return '—';
+ const date=new Date(value);
+ if(Number.isNaN(date.getTime()))return '—';
+ return date.toLocaleString('zh-CN',{
+  year:'numeric',month:'2-digit',day:'2-digit',
+  hour:'2-digit',minute:'2-digit',hour12:false
+ });
 }
 
 function registrationLabel(registration){
@@ -147,6 +157,12 @@ function deviceActionCell(device,registration){
  return '<button type="button" class="device-action" data-apple-register="'+escapeHTML(device.udid)+'">'+label+'</button>';
 }
 
+function deviceTimeCell(device){
+ const registered=formatLocalTime(device.registered_at||device.collected_at);
+ const updated=formatLocalTime(device.updated_at||device.collected_at);
+ return '<div class="device-time-cell"><span><small>登记</small><strong>'+escapeHTML(registered)+'</strong></span><span><small>更新</small><strong>'+escapeHTML(updated)+'</strong></span></div>';
+}
+
 function renderDevices(){
  const container=ensureDeviceListContainer();
  if(!container)return;
@@ -159,10 +175,11 @@ function renderDevices(){
   const friendlyName=String(device.name||'').trim();
   const product=String(device.product||'iOS Device').trim()||'iOS Device';
   const primaryName=friendlyName||product;
-  const secondaryName=friendlyName?product:'再次通过 ota.ioant.com 登记可设置设备名称';
+  const secondaryName=friendlyName?'<small>'+escapeHTML(product)+'</small>':'';
   return '<tr>'+ 
-   '<td class="device-name-cell"><div class="device-name-line"><strong>'+escapeHTML(primaryName)+'</strong><span class="badge">'+escapeHTML(device.status||'pending_apple_registration')+'</span></div><small>'+escapeHTML(secondaryName)+'</small></td>'+ 
+   '<td class="device-name-cell"><div class="device-name-line"><strong>'+escapeHTML(primaryName)+'</strong><span class="badge">'+escapeHTML(device.status||'pending_apple_registration')+'</span></div>'+secondaryName+'</td>'+ 
    '<td><strong class="device-secondary">iOS '+escapeHTML(device.version||'—')+'</strong><small>'+escapeHTML(sourceName(device.source))+'</small></td>'+ 
+   '<td>'+deviceTimeCell(device)+'</td>'+ 
    '<td><code class="device-udid">'+escapeHTML(device.udid)+'</code></td>'+ 
    '<td>'+deviceTeamCell(device)+'</td>'+ 
    '<td><strong class="device-registration-status '+context.statusClass+'">'+escapeHTML(context.summary)+'</strong></td>'+ 
@@ -170,7 +187,7 @@ function renderDevices(){
   '</tr>';
  }).join('');
  container.innerHTML='<table class="device-registry-table" aria-label="注册设备列表">'+
-  '<thead><tr><th>设备</th><th>系统 / 来源</th><th>UDID</th><th>Apple Team</th><th>Apple 注册状态</th><th>操作</th></tr></thead>'+ 
+  '<thead><tr><th>设备</th><th>系统 / 来源</th><th>登记 / 更新（本地）</th><th>UDID</th><th>Apple Team</th><th>Apple 注册状态</th><th>操作</th></tr></thead>'+ 
   '<tbody>'+rows+'</tbody>'+ 
  '</table>';
 }
