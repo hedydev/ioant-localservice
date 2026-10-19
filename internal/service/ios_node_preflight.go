@@ -50,6 +50,30 @@ func replaceEnvValue(env []string, key, value string) []string {
 	return append(out, prefix+value)
 }
 
+// preferPreflightNodeOnPath keeps the validated Node ahead of stale Homebrew
+// installations. NODE_BINARY alone is insufficient: project scripts, npm,
+// Expo and CocoaPods also invoke the ordinary "node" command through PATH.
+func preferPreflightNodeOnPath(env []string, node string) []string {
+  preferred := filepath.Dir(node)
+  parts := []string{preferred}
+  for _, dir := range filepath.SplitList(envValue(env, "PATH")) {
+    if dir == "" || filepath.Clean(dir) == filepath.Clean(preferred) {
+      continue
+    }
+    parts = append(parts, dir)
+  }
+  return replaceEnvValue(env, "PATH", strings.Join(parts, string(os.PathListSeparator)))
+}
+
+// Expo builds must not start a login shell that rewrites the validated PATH.
+// Other existing Profile types retain their historical login-shell behavior.
+func profileBuildShellArgs(platform, buildType, command string) []string {
+  if portableIOSNodePreflightEnabled(platform, buildType) {
+    return []string{"-c", command}
+  }
+  return []string{"-lc", command}
+}
+
 func emitBuildEvent(log io.Writer, event BuildEvent) {
 	raw, err := json.Marshal(event)
 	if err != nil {
@@ -356,6 +380,8 @@ func preparePortableIOSNodeEnvironment(ctx context.Context, root, platform, buil
 
 	env = replaceEnvValue(env, "NODE_BINARY", node)
 	env = replaceEnvValue(env, "ILS_NODE_BINARY", node)
+	env = preferPreflightNodeOnPath(env, node)
+	fmt.Fprintf(log, "Pinned Expo build PATH to validated Node: %s\n", node)
 	message := "Node " + version + " · " + node
 	if len(report.Repaired) > 0 {
 		message += " · 已修复 " + strings.Join(report.Repaired, ", ")
