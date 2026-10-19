@@ -182,6 +182,61 @@ func TestReplaceEnvValueUsesSingleEffectiveValue(t *testing.T) {
 	}
 }
 
+func TestPreflightNodePathWinsOverBrokenHomebrewNode(t *testing.T) {
+  root := t.TempDir()
+  goodDir := filepath.Join(root, "fnm")
+  badDir := filepath.Join(root, "homebrew")
+  for _, dir := range []string{goodDir, badDir} {
+    if err := os.MkdirAll(dir, 0755); err != nil {
+      t.Fatal(err)
+    }
+  }
+  goodNode := filepath.Join(goodDir, "node")
+  if err := os.WriteFile(goodNode, []byte("#!/bin/sh\necho v24.21.0\n"), 0755); err != nil {
+    t.Fatal(err)
+  }
+  if err := os.WriteFile(filepath.Join(badDir, "node"), []byte("#!/bin/sh\necho 'dyld: libsimdutf not loaded' >&2\nexit 127\n"), 0755); err != nil {
+    t.Fatal(err)
+  }
+  env := preferPreflightNodeOnPath([]string{"PATH=" + badDir + ":" + goodDir + ":/usr/bin:/bin"}, goodNode)
+  if got := resolveNodeFromPath(envValue(env, "PATH")); got != goodNode {
+    t.Fatalf("resolved node = %q, want %q", got, goodNode)
+  }
+  args := profileBuildShellArgs("ios", "expo", "node --version")
+  cmd := exec.Command("/bin/bash", args...)
+  cmd.Env = env
+  raw, err := cmd.CombinedOutput()
+  if err != nil || strings.TrimSpace(string(raw)) != "v24.21.0" {
+    t.Fatalf("Expo profile shell did not use validated Node: err=%v output=%q", err, raw)
+  }
+}
+
+func TestProfileShellPreservesLegacyBehaviorForOtherBuilds(t *testing.T) {
+  testCases := []struct {
+    platform string
+    buildType string
+    wantFlag string
+  }{
+    {"ios", "expo", "-c"},
+    {"ios", "native", "-lc"},
+    {"macos", "tauri", "-lc"},
+    {"macos", "expo", "-lc"},
+  }
+  for _, tc := range testCases {
+    args := profileBuildShellArgs(tc.platform, tc.buildType, "echo ok")
+    if len(args) != 2 || args[0] != tc.wantFlag || args[1] != "echo ok" {
+      t.Fatalf("profileBuildShellArgs(%q,%q) = %#v", tc.platform, tc.buildType, args)
+    }
+  }
+}
+
+func TestPreflightNodePathDeduplicated(t *testing.T) {
+  env := preferPreflightNodeOnPath([]string{"PATH=/x:/y:/x:/usr/bin"}, "/x/node")
+  if got := envValue(env, "PATH"); got != "/x:/y:/usr/bin" {
+    t.Fatalf("PATH = %q", got)
+  }
+}
+
 func TestPortableIOSNodePreflightEnabled(t *testing.T) {
 	if !portableIOSNodePreflightEnabled("ios", "expo") {
 		t.Fatal("ios + expo should enable preflight")
