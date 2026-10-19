@@ -461,14 +461,14 @@ func (a *App) runLocalCheckoutBuild(ctx context.Context, cancel context.CancelFu
 		job.Stage = "preflight"
 		_ = a.writeBuild(job)
 		fmt.Fprintf(log, "ILS Release Profile: %s (%s)\nSingle entrypoint: %s\n", profile.Name, profile.ID, profile.BuildCommand)
-		if err = runProcess(ctx, source.Path, jobLog, env, "/bin/bash", "-lc", profile.BuildCommand); err != nil {
+		if err = runProcess(ctx, source.Path, jobLog, env, "/bin/bash", profileBuildShellArgs(profile.Platform, snapshot.BuildType, profile.BuildCommand)...); err != nil {
 			finish("failed", "ILS Build Command 失败或任务超时；详情见日志")
 			return
 		}
 		if profile.PackageCommand != "" {
 			job.Stage = "package"
 			_ = a.writeBuild(job)
-			if err = runProcess(ctx, source.Path, jobLog, env, "/bin/bash", "-lc", profile.PackageCommand); err != nil {
+			if err = runProcess(ctx, source.Path, jobLog, env, "/bin/bash", profileBuildShellArgs(profile.Platform, snapshot.BuildType, profile.PackageCommand)...); err != nil {
 				finish("failed", "ILS Package Command 失败或任务超时；详情见日志")
 				return
 			}
