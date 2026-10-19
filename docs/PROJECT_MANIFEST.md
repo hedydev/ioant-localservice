@@ -101,9 +101,10 @@ For iOS Release builds, use an iPhoneOS-only archive target (`-sdk iphoneos`, `g
 
 ## Current project manifests
 
-As of 2026-10-06:
+As of 2026-10-19:
 
 - ChatDock: macOS Test, iOS Ad Hoc, iOS TestFlight.
 - WinCat: macOS Internal Test only. The ILS lane does **not** invoke the separate CrossOver/WineCX compatibility package script.
 - Ioant Workbench (IWB): macOS Test, iOS Ad Hoc, iOS TestFlight.
+- Free Master (`hedydev/ioant-freemaster`): Apple Development-signed `macos-test` only, via `.ils/project.json` + `scripts/ils-build-macos.sh`. The DMG is created without a Finder mount. Real Mac build still needs acceptance; see the Free Master repository's `docs/ILS_MACOS_INTERNAL_TEST.md`.
 - Sowhat remains the first end-to-end validated reference integration; its existing local profiles continue to work independently of this importer.
