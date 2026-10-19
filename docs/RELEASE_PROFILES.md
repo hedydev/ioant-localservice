@@ -120,6 +120,8 @@ ILS_NODE_BINARY
 
 Both point to the Node executable resolved on the current Mac before the project build command starts.
 
+For Expo / React Native iOS Profiles, ILS also places the validated Node directory first in the Build Job `PATH` and launches the project Profile with a non-login Bash shell (`bash -c` instead of `bash -lc`). Login startup files may silently reorder `PATH` and select a different Homebrew Node than the one that passed the preflight; `NODE_BINARY` alone cannot protect project scripts that invoke plain `node`. This preserves a consistent Node for the top-level script, npm, Expo, and subprocesses. Non-Expo Profiles retain their existing login-shell execution model. On macOS, a Node binary can have executable permissions but still fail to load due to a missing linked Homebrew dylib; the preflight requires a successfully executed `node --version`, not just an executable path.
+
 The standard project script must place final release evidence beneath `ILS_OUTPUT_DIR`. Large compiler/package caches may remain in the project's configured development cache.
 
 ## Expo / React Native iOS Node preflight
