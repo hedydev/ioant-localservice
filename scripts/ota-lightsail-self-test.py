@@ -52,11 +52,10 @@ class OTALightsailSafetyTests(unittest.TestCase):
 
     def test_audit_does_not_acknowledge_or_generate_challenge(self):
         a=AUDIT.read_text()
-        self.assertIn("GET",a) if False else None
         self.assertIn("/api/ils/devices/pending",a)
         self.assertIn("token_matches_local",a)
         self.assertNotIn("/api/ils/devices/{id}/ack",a)
-        self.assertNotIn("enroll.mobileconfig\")",a)
+        self.assertNotIn('request("/enroll.mobileconfig"',a)
         self.assertNotIn("systemctl restart",a)
         self.assertNotIn("stop-instances",a)
 
