@@ -8,7 +8,10 @@ pass_syntax=false
 pass_unit=false
 pass_go=false
 pass_build=false
-bash -n scripts/deploy-adhoc-ota-gateway.sh scripts/finish-ota-profile-signing.sh scripts/ota-lightsail-validate.sh && pass_syntax=true
+for script in scripts/deploy-adhoc-ota-gateway.sh scripts/finish-ota-profile-signing.sh scripts/ota-lightsail-validate.sh; do
+  bash -n "$script"
+done
+pass_syntax=true
 python3 scripts/ota-lightsail-self-test.py >/dev/null && pass_unit=true
 go test ./... >/dev/null && pass_go=true
 tmp="$(mktemp -d)"
