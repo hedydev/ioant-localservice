@@ -63,10 +63,6 @@ if release.is_dir():
         if items:
             rel=items[0].relative_to(pathlib.Path("/srv/ils-adhoc-ota"))
             path="/"+str(rel)
-            c,_=cmd(["curl","--silent","--output","/dev/null","--write-out","%{http_code}",
-                "--noproxy","*","--resolve","ota.ioant.com:443:127.0.0.1","--max-time","8",
-                "-I","https://ota.ioant.com"+path])
-            # More reliable separate status probe; neither reads response bodies.
             c,body=cmd(["curl","--silent","--output","/dev/null","--write-out","%{http_code}",
                 "--noproxy","*","--resolve","ota.ioant.com:443:127.0.0.1","--max-time","8",
                 "-I","https://ota.ioant.com"+path])
@@ -144,7 +140,13 @@ def main():
     else:
         report["remote_error"]="LOCAL_TOKEN_OR_SSH_KEY_UNAVAILABLE"
     statuses=[report["public"].get(p,{}).get("http_status") for p in ("/","/enroll","/_ils/health")]
-    if statuses==[200,200,200] and report["remote"] and report["remote"].get("token_matches_local") and report["authenticated_pending"] and report["authenticated_pending"].get("http_status")==200:
+    if (statuses==[200,200,200] and report["local_config_host_correct"] and report["local_public_url_correct"]
+        and report["public"]["/api/ils/devices/pending"]["http_status"]==401
+        and report["public"]["/_ils/health"].get("service_ok") is True
+        and report["public"]["/enroll"].get("form_present") is True
+        and report["remote"] and report["remote"].get("token_matches_local")
+        and report["authenticated_pending"] and report["authenticated_pending"].get("http_status")==200
+        and report["authenticated_pending"].get("valid_response") is True):
         report["result"]="READONLY_HTTP_TOKEN_SYNC_PASS"
     else:
         report["result"]="READONLY_AUDIT_PARTIAL_REVIEW"
