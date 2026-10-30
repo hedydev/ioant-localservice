@@ -46,8 +46,11 @@ cert_pub="$(sudo -n openssl x509 -in "$root/profile-signing-cert.pem" -pubkey -n
 key_pub="$(sudo -n openssl pkey -in "$root/profile-signing-key.pem" -pubout -outform DER | sha256sum | cut -d' ' -f1)"
 [[ "$cert_pub" == "$key_pub" ]] || { echo 'SIGNING_CERT_KEY_MISMATCH'; exit 1; }
 sudo -n test -s "$lineage/cert.pem" || { echo 'CERTBOT_LINEAGE_ABSENT'; exit 1; }
-# No signing material or public key hash printed.
-echo 'SIGNING_CERT_VALID_KEY_MATCHES'
+installed_fp="$(sudo -n openssl x509 -in "$root/profile-signing-cert.pem" -noout -fingerprint -sha256)"
+lineage_fp="$(sudo -n openssl x509 -in "$lineage/cert.pem" -noout -fingerprint -sha256)"
+[[ "$installed_fp" == "$lineage_fp" ]] || { echo 'SIGNING_CERT_DIFFERS_FROM_CERTBOT_LINEAGE_REVIEW'; exit 1; }
+# No signing material, fingerprint or public key hash printed.
+echo 'SIGNING_CERT_VALID_KEY_MATCHES_LINEAGE'
 echo 'CERTBOT_LINEAGE_PRESENT'
 REMOTE
 curl --fail --silent --show-error --max-time 12 "https://$DOMAIN/_ils/health" |
