@@ -49,6 +49,9 @@ sudo -n test -s "$lineage/cert.pem" || { echo 'CERTBOT_LINEAGE_ABSENT'; exit 1; 
 installed_fp="$(sudo -n openssl x509 -in "$root/profile-signing-cert.pem" -noout -fingerprint -sha256)"
 lineage_fp="$(sudo -n openssl x509 -in "$lineage/cert.pem" -noout -fingerprint -sha256)"
 [[ "$installed_fp" == "$lineage_fp" ]] || { echo 'SIGNING_CERT_DIFFERS_FROM_CERTBOT_LINEAGE_REVIEW'; exit 1; }
+sudo -n test -s "$lineage/chain.pem" || { echo 'CERTBOT_CHAIN_MISSING'; exit 1; }
+sudo -n cmp -s "$root/profile-signing-chain.pem" "$lineage/chain.pem" ||
+  { echo 'SIGNING_CHAIN_DIFFERS_FROM_CERTBOT_LINEAGE_REVIEW'; exit 1; }
 # No signing material, fingerprint or public key hash printed.
 echo 'SIGNING_CERT_VALID_KEY_MATCHES_LINEAGE'
 echo 'CERTBOT_LINEAGE_PRESENT'
