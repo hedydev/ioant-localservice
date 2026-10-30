@@ -494,3 +494,22 @@ ILS 已重新由当前会话接手；不要再按“返回 Sowhat 后暂停”�
 8. 继续确认 Apple Processing / TestFlight available 状态只由 App Store Connect API 真实证据推进。
 
 在上述本机测试、重启和真实 224/228 回填验证完成前，不得把本轮 ILS 修复记录为“已验证通过”。
+
+---
+
+## 2026-10-30 — OTA Gateway EC2 → Lightsail 项目侧收尾
+
+**AWS 迁移已完成，禁止再次迁移或切换 DNS。** 用户授权的 AWS 独立工作流在 `hedydev/ioant-ai-sync-note` 分支 `aws` 中留有真实操作收据：`ota.ioant.com`、`ioant.com`、`www.ioant.com` 的 Route 53 A 记录切至 `13.213.140.184` 且 `INSYNC`，新 Lightsail 的 Nginx/HTTPS/OTA service 正常，旧 WFK EC2 `i-0359cf3e8c28a7df1` 已停止、EBS 保留。原公网地址 `52.77.167.119` 只作为历史记录；不再是任何 ILS 脚本的默认部署目标。Mac ILS 服务仍在本机 `8787`。
+
+**新的维护入口**：
+- `scripts/deploy-adhoc-ota-gateway.sh` 默认只读 `--plan`，新 SSH 默认 `ubuntu@13.213.140.184` 与 `~/.ssh/ioant-lightsail-20261026`；历史 `--prepare-only` / `--email` 全量安装流程不再可用。
+- 只有经过单独审批的 `--apply-binary --confirm-gateway-restart` 才允许二进制单项升级，保留受限旧二进制备份并失败时尝试回滚；不修改 Nginx、Certbot、systemd unit、TLS、profile signing、设备数据、IPA/manifest、同步令牌或 DNS。
+- `scripts/finish-ota-profile-signing.sh --plan` 只验证既有 cert/key/chain 与 TLS 证书 lineage，不覆盖 PEM 或执行服务重启。
+- `scripts/ota-lightsail-audit.py` 与 `.openclaw/tasks/ota-lightsail-readonly.json` 进行只读 HTTPS、证书、令牌一致性、私有 GET、现有 release HEAD 和 state presence 观察。输出不会包含 UDID、token、私钥、manifest 路径或证书内容。
+- `scripts/ota-lightsail-self-test.py`、`scripts/ota-lightsail-validate.sh` 与 pinned local validation task 检查脚本 Bash、Go 测试/构建和不破坏生产数据的静态不变量。
+
+**验收必须分层：** AWS 侧已验证 DNS/HTTPS 与新 Gateway active/enabled（截止 2026-10-30 早前收据），但 ILS 对 token parity、带令牌的 `GET /api/ils/devices/pending`、新 iOS callback/Device Registry ACK、签名移动配置文件、真实 IPA/Manifest 下载/安装/更新、重启后状态保持仍要求独立验证。Gateway `profile_signed` 当前只表示证书与私钥文件存在/可读，不能单凭它断言签名证书有效。
+
+**本轮执行障碍：** 已通过 OpenClaw Mac 建立 ILS 独立上下文 `repo-ioant-localservice-5a42d7213b`。首次运行 pinned local validation `ils_ota_lightsail_localtests_20261030_01`，被执行器按 `dirty_worktree` 安全拒绝，**没有运行 Go 测试，也没有触及生产**。不允许 reset/clean/stash 或覆盖用户未提交改动。独立环境的公网 `web` 读取和容器 DNS 亦未能取得可信实时 OTA 响应，不能声称本轮公网复验已通过。任务清单和脚本已提交待保持本地工作区后复验。
+
+**严禁**：恢复/终止旧 WFK EC2、重置 `/var/lib/ils-ota-gateway`、覆盖已迁移 signing PEM 和 sync token、改 Xray/REALITY、变更其他 Nginx vhost、触碰 NetScale/CASE78 所在 Lightsail `13.228.218.141`、删除生产 IPA/manifest。完整边界及验收 ledger 见 `docs/ADHOC_OTA_GATEWAY.md`。
