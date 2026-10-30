@@ -506,6 +506,7 @@ ILS 已重新由当前会话接手；不要再按“返回 Sowhat 后暂停”�
 - 只有经过单独审批的 `--apply-binary --confirm-gateway-restart` 才允许二进制单项升级，保留受限旧二进制备份并失败时尝试回滚；不修改 Nginx、Certbot、systemd unit、TLS、profile signing、设备数据、IPA/manifest、同步令牌或 DNS。
 - `scripts/finish-ota-profile-signing.sh --plan` 只验证既有 cert/key/chain 与 TLS 证书 lineage，不覆盖 PEM 或执行服务重启。
 - `scripts/ota-lightsail-audit.py` 与 `.openclaw/tasks/ota-lightsail-readonly.json` 进行只读 HTTPS、证书、令牌一致性、私有 GET、现有 release HEAD 和 state presence 观察。输出不会包含 UDID、token、私钥、manifest 路径或证书内容。
+- `scripts/ota-lightsail-rebind-local.py`：默认只读计划；确认旧/新 sync token 一致及私有 GET 200 后，显式 `--apply --confirm-local-config-only` 只更改 Mac 本地 `.localservice/ota-gateway.json` 的 `ssh_host` 和 `ssh_key_path`，保留 0600 备份。Go `normalizeOTAGatewayConfig()` 对停止的 `52.77.167.119` 和无关 `13.228.218.141` fail-closed，避免旧本机配置继续向错误目标推送。**本机变更仍未执行**（dirty worktree 阻断）。
 - `scripts/ota-lightsail-self-test.py`、`scripts/ota-lightsail-validate.sh` 与 pinned local validation task 检查脚本 Bash、Go 测试/构建和不破坏生产数据的静态不变量。
 
 **验收必须分层：** AWS 侧已验证 DNS/HTTPS 与新 Gateway active/enabled（截止 2026-10-30 早前收据），但 ILS 对 token parity、带令牌的 `GET /api/ils/devices/pending`、新 iOS callback/Device Registry ACK、签名移动配置文件、真实 IPA/Manifest 下载/安装/更新、重启后状态保持仍要求独立验证。Gateway `profile_signed` 当前只表示证书与私钥文件存在/可读，不能单凭它断言签名证书有效。
