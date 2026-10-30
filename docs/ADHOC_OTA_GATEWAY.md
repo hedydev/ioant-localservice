@@ -1,179 +1,100 @@
-# ILS Ad Hoc OTA EC2 Gateway
+# ILS OTA Gateway — existing Lightsail production (2026-10-30)
 
-This document covers the shared ILS public OTA Gateway for **Public Device Enrollment** and **Ad Hoc OTA Artifact Sync**. The Gateway is service-level infrastructure: every ILS project can reuse it; it is not a Sowhat-specific service.
+ILS Core remains on the developer Mac at `127.0.0.1:8787`. Only the shared public **OTA Gateway** (`cmd/ota-gateway`) was moved from EC2 to Lightsail. It is not an IWB, Sowhat or Free Master-specific service.
 
-The current deployment target is the existing Singapore Ubuntu EC2 that already runs Nginx and Certbot/Let's Encrypt:
+## Current production boundary
 
-```text
-EC2: 52.77.167.119
-SSH user: ubuntu
-SSH key: /Users/ted/Documents/workspace/aws-sigapore-v2ray.pem
-OTA root: /srv/ils-adhoc-ota
-```
+| Item | Current value |
+| --- | --- |
+| Region / AWS CLI | Singapore `ap-southeast-1`, profile `hedydev-sg` |
+| Instance | Lightsail `ioant-ls-wfk-20261026` (Ubuntu 24.04) |
+| Public IPv4 / domain | `13.213.140.184` / `https://ota.ioant.com` |
+| SSH | `ubuntu` using private local key `~/.ssh/ioant-lightsail-20261026` |
+| Binary | `/usr/local/bin/ils-ota-gateway` |
+| Service | `ils-ota-gateway.service`, `127.0.0.1:8790`, active and boot-enabled per AWS migration acceptance |
+| Web / published files | Nginx TCP 80/443; `/srv/ils-adhoc-ota/releases/` |
+| Private state | `/var/lib/ils-ota-gateway` (devices/challenges) |
+| Private config | `/etc/ils-ota-gateway/sync-token`, `profile-signing-cert.pem`, `profile-signing-key.pem`, `profile-signing-chain.pem` |
+| Local ILS configuration | `.localservice/ota-gateway.json` and protected local `sync_token_file` |
 
-The workspace `.pem` file above is the **SSH private key used to log in to EC2**. It is not the HTTPS certificate. The public HTTPS certificate is issued and renewed on EC2 by **Certbot + Let's Encrypt**.
+**AWS migration was completed and website/DNS accepted on 2026-10-30**, based on the `hedydev/ioant-ai-sync-note` `aws` branch handoff and live MCP receipts. Route 53 change `/change/C0716287GDRLPTJEKY32` reached `INSYNC`: `ota.ioant.com`, `ioant.com`, `www.ioant.com` now point to `13.213.140.184`. After change, strict TLS HTTPS homepage checks were 200 even after the old EC2 was stopped. Old WFK EC2 `i-0359cf3e8c28a7df1` (`52.77.167.119`) is **stopped, not terminated**, EBS retained. Do not restart it, rerun the DNS cutover, or copy OTA state again.
 
-The deployment script deliberately creates a separate Nginx server block for the OTA hostname. It does not edit the existing `ioant.com` / V2Ray upstream configuration.
+**That AWS acceptance does not prove** a fresh authenticated OTA sync, new device callback, Apple signed enrollment profile install, actual IPA install/upgrade, or restart persistence of device records. The ILS-specific acceptance ledger below is separate.
 
-## DNS first
+Do not touch Xray/VLESS REALITY on this Lightsail, nor NetScale/CASE78 on **another** Lightsail `13.228.218.141`.
 
-Choose a dedicated subdomain, for example:
+## Safe maintenance: plan before change
 
-```text
-ota.ioant.com
-```
-
-Create a DNS **A** record:
-
-```text
-ota.ioant.com -> 52.77.167.119
-```
-
-The EC2 security group must allow inbound TCP 80 and 443. Nginx already owns the public HTTP/HTTPS ports on this host.
-
-DNS must resolve to the EC2 address before Let's Encrypt can issue the certificate.
-
-## Two-phase deployment
-
-If the DNS record has not been created yet, prepare the Nginx site first:
+The old provisioning behavior was unsafe for a populated server: it could generate and upload a new sync token, rewrite signing materials, replace Nginx vhosts and systemd units, restart services and run Certbot. **It has been removed from the standard maintenance entrypoint.**
 
 ```sh
-cd /Users/ted/Documents/workspace/ioant-localservice
-
-./scripts/deploy-adhoc-ota-gateway.sh \
-  --domain ota.ioant.com \
-  --prepare-only
+cd ~/Documents/workspace/ioant-localservice
+bash scripts/deploy-adhoc-ota-gateway.sh --plan
+bash scripts/finish-ota-profile-signing.sh --plan
 ```
 
-This:
+Both default to **read-only** and connect over SSH with strict host-key verification. The deployment plan confirms the current Ubuntu service, existing paths, token/signing-material presence and loopback health. The signing plan additionally checks certificate expiration (24h threshold), installed cert/key public-key equality, Certbot lineage existence and public `profile_signed` flag. The tests do not print token/key material and do not create enrollment challenges.
 
-- connects to the current EC2 using the workspace SSH key;
-- cross-builds and deploys the small `cmd/ota-gateway` Go service;
-- runs that service only on `127.0.0.1:8790` behind Nginx/systemd;
-- creates `/srv/ils-adhoc-ota/releases` for public IPA/manifest files;
-- keeps enrollment state privately under `/var/lib/ils-ota-gateway`, outside the Nginx static root;
-- creates a random ILS↔Gateway sync bearer token and stores its local copy under `.localservice/`;
-- writes `.localservice/ota-gateway.json` so the local ILS can discover the Gateway;
-- adds a dedicated Nginx HTTP server block;
-- runs `nginx -t` before reload;
-- leaves the existing Nginx sites untouched;
-- does **not** request a TLS certificate in `--prepare-only` mode.
-
-After the DNS A record resolves publicly, run the normal deployment:
+For an explicitly approved **binary-only** Gateway update (not part of this migration closeout), after reviewing a fresh plan:
 
 ```sh
-./scripts/deploy-adhoc-ota-gateway.sh \
-  --domain ota.ioant.com \
-  --email YOUR_LETS_ENCRYPT_EMAIL
+bash scripts/deploy-adhoc-ota-gateway.sh --apply-binary --confirm-gateway-restart
 ```
 
-The script verifies the DNS target, installs Certbot only if it is missing, requests/renews the certificate through the Nginx plugin, enables HTTP -> HTTPS redirect, reloads Nginx, and verifies all three paths:
+This compiles `cmd/ota-gateway` for Linux, stages a new executable, backs up the previous executable under restricted `/var/backups/ils-ota-gateway/`, updates only `/usr/local/bin/ils-ota-gateway`, restarts only `ils-ota-gateway.service`, and checks loopback health; on failure it attempts a binary rollback and a Gateway restart. **Do not use this against production without a separate planned change window and verified backup/rollback readiness.** It does not run Certbot, change Nginx, DNS, systemd unit, sync tokens, signed profile keys, or release data.
 
-```text
-https://ota.ioant.com/
-https://ota.ioant.com/enroll
-https://ota.ioant.com/_ils/health
-```
+Supported optional overrides: `--host`, `--ssh-user`, `--ssh-key`, `--domain`; `ILS_OTA_LIGHTSAIL_HOST/USER/KEY` and `ILS_OTA_DOMAIN`. Legacy `ILS_OTA_EC2_HOST/USER/KEY` aliases are accepted for compatibility but the stopped EC2 address is explicitly refused.
 
-It also performs an authenticated check of the private ILS sync endpoint. The script is safe to re-run. It backs up an existing ILS OTA site config before replacing it and runs `nginx -t` before each reload.
+Certbot/TLS renewals belong to the **existing running server's** established renewal hook. Do not reinstall or reissue the production certificate through ILS's old deployment script. A new installation requires its own reviewed provisioning plan; `--prepare-only`, `--email` and implicit first-time state creation are intentionally unavailable.
 
-## Overrides
+## Safe read-only business audit
 
-The current machine/server values are defaults, not hard requirements:
+`scripts/ota-lightsail-audit.py` is an OpenClaw pinned, read-only task. It checks:
 
-```sh
-./scripts/deploy-adhoc-ota-gateway.sh \
-  --domain ota.example.com \
-  --email ops@example.com \
-  --host 203.0.113.10 \
-  --ssh-user ubuntu \
-  --ssh-key /path/to/server.pem \
-  --remote-root /srv/ils-adhoc-ota
-```
+- Public strict HTTPS `/`, `/enroll`, `/_ils/health` response and enrollment-form presence.
+- Unauthorized `GET /api/ils/devices/pending` response (should be 401). With locally configured bearer token, authenticated `GET` should return a JSON array. It reports counts/status only, **never UDIDs or token values**.
+- Local `.localservice/ota-gateway.json` hostname, HTTPS origin and protected `sync_token_file`; compares local token SHA-256 to the existing remote token **internally**, reporting only a match boolean.
+- Read-only remote systemd state, OTA loopback health, file/directory existence, public release counts, existing manifest/IPA HEAD status, signing certificate expiration and cert/private-key public-key match.
 
-Equivalent environment variables are available:
+It **does not** request `/enroll.mobileconfig` (which would create a new challenge), post device callbacks, ACK pending devices, upload files, publish Releases, restart a service or mutate Route 53. A missing local token, unavailable SSH/sudo, lack of existing files or incomplete response is reported as `PARTIAL` rather than a fake PASS.
 
-```text
-ILS_OTA_EC2_HOST
-ILS_OTA_EC2_USER
-ILS_OTA_EC2_KEY
-ILS_OTA_REMOTE_ROOT
-ILS_OTA_DATA_DIR
-```
+To run the committed OpenClaw task: `.openclaw/tasks/ota-lightsail-readonly.json` pinned to the exact ILS `main` commit. Offline checks: `scripts/ota-lightsail-self-test.py`, and `.openclaw/tasks/ota-lightsail-validate.json` for Bash syntax + Go unit/build. **The first ILS OpenClaw execution on 2026-10-30 was blocked by a dirty local worktree, without test/production mutation.** Resolve only the unrelated local changes with the owner; never force-clean them.
 
-## Public Device Enrollment
+## Existing enrollment and artifact contract
 
-The public enrollment flow is:
+Real gateway endpoints in `cmd/ota-gateway/main.go`:
 
-```text
-iPhone / iPad
-  -> https://ota.ioant.com/enroll
-  -> one-time 15 minute mobileconfig challenge
-  -> iOS Profile Service callback
-  -> CMS integrity verification on EC2
-  -> private pending device record
-  -> local ILS pulls with Bearer auth
-  -> existing ILS Device Registry
-```
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /_ils/health` | JSON service status; `profile_signed` is **presence/readability**, not proof certificate validity |
+| `GET /enroll` | HTML page with manually entered friendly device name; GET itself is read-only |
+| `GET/POST /enroll.mobileconfig` | Creates one-time Profile Service challenge and CMS-signed payload if signing configured; **writes state** |
+| `POST /device/callback/{challenge}` | Verifies CMS content, consumes challenge and writes pending device identity; **writes state** |
+| `GET /api/ils/devices/pending` | Bearer-authenticated read of pending devices; avoid logging UDIDs |
+| `POST /api/ils/devices/{id}/ack` | Bearer-authenticated removal after ILS successfully imports; **writes state** |
+| `/releases/<project>/<opaque-id>/manifest.plist`, `app.ipa` | Static Nginx files; GET/HEAD only, no directory listing |
 
-The Gateway only stores a pending device until ILS acknowledges a successful import. The local Device Registry remains the source of truth. Publicly enrolled devices are marked with `source=public_ota_gateway`; the existing local enrollment path remains available and uses `source=local_ils`.
+The public enrollment workflow requests UDID, PRODUCT and VERSION, then local ILS imports into the global Device Registry. Device identities are not Apple-verified solely by CMS integrity. Apple Developer device registration and provisioning profiles remain separate. Gateway device state resides privately outside Nginx's static root.
 
-The Gateway does **not** register the UDID with Apple Developer automatically. A collected device remains `pending_apple_registration` until the administrator completes the Apple-side registration/profile workflow.
+ILS Ad Hoc/Enterprise Release publish records the local Release first; then OTA SSH/SCP uploads the IPA + manifest to an opaque Release ID path, verifies public HEAD and marks `ota.status=synced` only upon success. Failure is persisted for retries, without deleting the local Release. The manifest uses `https://ota.ioant.com/releases/...`. TestFlight uploads do not use this OTA artifact path. Existing URLs are opaque but not time-limited signed URLs.
 
-## OTA Artifact Sync
+## Remaining acceptance — do not infer from homepage 200
 
-Eligible Ad Hoc/Enterprise iOS Releases are synchronized by ILS after the local Release has already been saved. A temporary SSH failure therefore does not destroy the local Release.
+| Gate | Acceptance criterion | Current closeout status |
+| --- | --- | --- |
+| DNS / Lightsail / HTTPS site | Exact new A record and strict HTTPS 200 | **AWS migration confirmed (2026-10-30)** |
+| Gateway loopback and boot persistence | Service active/enabled, loopback health | **AWS migration confirmed (2026-10-30)** |
+| Signed enrollment | `profile_signed`, valid matching certificate/key/chain, real CMS and iOS enrollment | **ILS-specific fresh validation pending** |
+| Private API and local token parity | Authenticated pending devices returns 200, token matches | **Pending** |
+| Device Registry sync | New real device registration and ACK, no duplicate/leak | **Pending**, requires authorized device test |
+| IPA/manifest | Existing files HEAD 200, downloads correct MIME, iOS install | **Pending** |
+| Release OTA update | `pending→syncing→synced` on a real Release, retry errors preserved | **Pending** |
+| Restart durability | Before/after state inventory with authorized restart window | **Pending; never restart solely for audit** |
 
-State:
+Historical documents may describe an earlier EC2-based implementation or earlier successful test devices. They are not automatically a passing **post-Lightsail** test.
 
-```text
-local Release saved
-  -> ota.status=pending/syncing
-  -> SSH/SCP staging upload
-  -> atomic remote directory replace
-  -> public HEAD verification
-  -> ota.status=synced
-  -> install_url becomes itms-services://...
-```
+## Recovery boundary
 
-Failures are persisted as `ota.status=failed` with an error and can be retried from the ILS Web UI.
+For a failed explicit binary-only update, the remote script attempts restoring its restricted backup. If the result is uncertain, perform **read-only** service, hash and health checks before any manual retry. Never recreate `/var/lib/ils-ota-gateway` or tokens to repair a failed health check.
 
-Remote layout uses the random ILS Release ID rather than a predictable version/build path:
-
-```text
-/srv/ils-adhoc-ota/releases/
-└── <project>/
-    └── <opaque-release-id>/
-        ├── app.ipa
-        └── manifest.plist
-```
-
-The manifest references the public EC2 IPA URL. TestFlight Releases never enter this artifact sync path.
-
-## ILS Web
-
-The iOS page now exposes the service-level Gateway state to administrators:
-
-- verify Gateway;
-- sync pending public devices into the existing Device Registry;
-- sync/retry eligible Ad Hoc artifacts;
-- show device source;
-- show per-Release OTA sync state;
-- use the public `/enroll` URL for device registration whenever the Gateway is configured.
-
-The sync token itself is never returned to the browser.
-
-## Security
-
-- Do not commit the EC2 SSH private key.
-- The script enforces mode `0600` on the local SSH key before connecting.
-- It uses `StrictHostKeyChecking=accept-new`, not disabled host-key verification.
-- Public OTA artifact locations allow only GET/HEAD and directory listing is disabled.
-- Public enrollment uses a random one-time challenge with a 15 minute expiry.
-- The iOS callback body is capped at 1 MiB and its CMS integrity is verified before accepting UDID data.
-- Pending device records are kept outside the public static root.
-- `/api/ils/*` requires a separate random bearer token shared only between local ILS and the Gateway.
-- The Gateway process listens only on `127.0.0.1:8790`; Nginx is the only public frontend.
-- Certbot certificate/private-key material remains under `/etc/letsencrypt` on EC2.
-- Release paths contain opaque random Release IDs and Nginx does not expose directory indexes. These URLs are currently stable, not time-limited signed URLs.
-- Ad Hoc HTTPS does not replace Apple device authorization: the IPA must still be signed by an Ad Hoc provisioning profile containing the target device UDID.
+Full AWS rollback is a separately authorized AWS operation: the old EC2 is stopped, the old published IPv4 may no longer be available on restart, and Route 53's original RRsets were captured in the AWS handoff. **Do not hardcode `52.77.167.119` as an unconditional rollback destination.** Neither ILS maintenance script restarts old EC2 or changes DNS.
