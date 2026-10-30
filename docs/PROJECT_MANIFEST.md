@@ -99,6 +99,10 @@ They must not install or launch the built application. They build, sign/export/p
 
 For iOS Release builds, use an iPhoneOS-only archive target (`-sdk iphoneos`, `generic/platform=iOS`, `SDKROOT=iphoneos`) rather than a Simulator target.
 
+## Public OTA Gateway is service-level, not a project Profile
+
+The repository-owned `.ils/project.json` controls product build lanes only. It must **never** embed the OTA Gateway's Lightsail SSH key/IP, public enrollment token, private signing materials, host-specific directories or release files. Those belong to the local ILS `.localservice/ota-gateway.json`, protected token file and existing Lightsail service installation. As of 2026-10-30 `ota.ioant.com` points to Lightsail `13.213.140.184`, while ILS itself stays on the Mac; consult `ADHOC_OTA_GATEWAY.md` for the read-only plan and remaining OTA business verification. Do not reimport profiles or rerun server provisioning solely to correct the public OTA address.
+
 ## Current project manifests
 
 As of 2026-10-19:
