@@ -1,61 +1,55 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
+# Read-only signing audit for the EXISTING Lightsail. Never replaces keys.
+set -Eeuo pipefail
 DOMAIN="${ILS_OTA_DOMAIN:-ota.ioant.com}"
-HOST="${ILS_OTA_EC2_HOST:-52.77.167.119}"
-SSH_USER="${ILS_OTA_EC2_USER:-ubuntu}"
-SSH_KEY="${ILS_OTA_EC2_KEY:-/Users/ted/Documents/workspace/aws-sigapore-v2ray.pem}"
-
-[[ -f "$SSH_KEY" ]] || { echo "ERROR: SSH key not found: $SSH_KEY" >&2; exit 1; }
-
-SSH_OPTS=(
-  -i "$SSH_KEY"
-  -o IdentitiesOnly=yes
-  -o StrictHostKeyChecking=accept-new
-  -o ConnectTimeout=12
-)
-
-ssh "${SSH_OPTS[@]}" "$SSH_USER@$HOST" bash -s -- "$DOMAIN" "$SSH_USER" <<'REMOTE'
-set -euo pipefail
-DOMAIN="$1"
-OWNER="$2"
-LINEAGE="/etc/letsencrypt/live/${DOMAIN}"
-TARGET="/etc/ils-ota-gateway"
-
-sudo test -s "$LINEAGE/cert.pem"
-sudo test -s "$LINEAGE/privkey.pem"
-sudo test -s "$LINEAGE/chain.pem"
-sudo install -d -o root -g "$OWNER" -m 0750 "$TARGET"
-sudo install -o root -g "$OWNER" -m 0640 "$LINEAGE/cert.pem" "$TARGET/profile-signing-cert.pem"
-sudo install -o root -g "$OWNER" -m 0640 "$LINEAGE/privkey.pem" "$TARGET/profile-signing-key.pem"
-sudo install -o root -g "$OWNER" -m 0640 "$LINEAGE/chain.pem" "$TARGET/profile-signing-chain.pem"
-
-sudo systemctl daemon-reload
-sudo systemctl restart ils-ota-gateway
-sudo systemctl is-active --quiet ils-ota-gateway
-
-curl --fail --silent --show-error http://127.0.0.1:8790/_ils/health
-printf '\n'
+HOST="${ILS_OTA_LIGHTSAIL_HOST:-${ILS_OTA_EC2_HOST:-13.213.140.184}}"
+USER="${ILS_OTA_LIGHTSAIL_USER:-${ILS_OTA_EC2_USER:-ubuntu}}"
+KEY="${ILS_OTA_LIGHTSAIL_KEY:-${ILS_OTA_EC2_KEY:-$HOME/.ssh/ioant-lightsail-20261026}}"
+usage() {
+  cat <<'EOF'
+Read-only OTA profile signing verification on the existing Lightsail:
+  --plan (default), --host HOST, --ssh-user USER, --ssh-key PATH,
+  --domain DOMAIN, --help
+This command NEVER overwrites certificate, chain, private key, sync token
+or registration data and NEVER restarts the Gateway or invokes Certbot.
+Certificate renewal should use the existing audited renewal hook.
+EOF
+}
+while (($#)); do
+  case "$1" in
+    --plan) shift ;;
+    --host|--ssh-user|--ssh-key|--domain)
+      (($#>=2)) || { echo 'Missing argument' >&2; exit 2; }
+      case "$1" in
+        --host) HOST="$2";; --ssh-user) USER="$2";;
+        --ssh-key) KEY="$2";; --domain) DOMAIN="$2";;
+      esac; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo 'ERROR: Signing material changes are not authorized in this read-only audit' >&2; exit 2 ;;
+  esac
+done
+[[ "$HOST" != 52.77.167.119 && "$HOST" != 13.228.218.141 ]] || { echo 'ERROR: blocked non-OTA target' >&2; exit 1; }
+[[ -f "$KEY" ]] || { echo 'ERROR: SSH key is unavailable' >&2; exit 1; }
+SSH_OPTS=(-i "$KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12)
+ssh "${SSH_OPTS[@]}" "$USER@$HOST" bash -s -- "$DOMAIN" <<'REMOTE'
+set -Eeuo pipefail
+domain="$1"
+root=/etc/ils-ota-gateway
+lineage="/etc/letsencrypt/live/$domain"
+for f in profile-signing-cert.pem profile-signing-chain.pem profile-signing-key.pem; do
+  sudo -n test -s "$root/$f" || { echo 'SIGNING_MATERIAL_MISSING'; exit 1; }
+done
+sudo -n openssl x509 -in "$root/profile-signing-cert.pem" -noout -checkend 86400 >/dev/null ||
+  { echo 'SIGNING_CERT_INVALID_OR_EXPIRING'; exit 1; }
+# Verify key correspondence by comparing public keys, never exporting key bytes.
+cert_pub="$(sudo -n openssl x509 -in "$root/profile-signing-cert.pem" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | cut -d' ' -f1)"
+key_pub="$(sudo -n openssl pkey -in "$root/profile-signing-key.pem" -pubout -outform DER | sha256sum | cut -d' ' -f1)"
+[[ "$cert_pub" == "$key_pub" ]] || { echo 'SIGNING_CERT_KEY_MISMATCH'; exit 1; }
+sudo -n test -s "$lineage/cert.pem" || { echo 'CERTBOT_LINEAGE_ABSENT'; exit 1; }
+# No signing material or public key hash printed.
+echo 'SIGNING_CERT_VALID_KEY_MATCHES'
+echo 'CERTBOT_LINEAGE_PRESENT'
 REMOTE
-
-HEALTH="$(curl --fail --silent --show-error --max-time 15 "https://${DOMAIN}/_ils/health")"
-printf '%s\n' "$HEALTH"
-printf '%s' "$HEALTH" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") is True, d; assert d.get("profile_signed") is True, d'
-
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
-PROFILE="$TMP_DIR/enroll.mobileconfig"
-curl --fail --silent --show-error --max-time 15 "https://${DOMAIN}/enroll.mobileconfig" -o "$PROFILE"
-
-if command -v security >/dev/null 2>&1; then
-  security cms -D -i "$PROFILE" >/dev/null
-elif openssl cms -help >/dev/null 2>&1; then
-  openssl cms -verify -inform DER -noverify -in "$PROFILE" -out /dev/null >/dev/null 2>&1
-else
-  openssl smime -verify -inform DER -noverify -in "$PROFILE" -out /dev/null >/dev/null 2>&1
-fi
-
-printf 'OTA enrollment profile signing is ready: https://%s/enroll\n' "$DOMAIN"
+curl --fail --silent --show-error --max-time 12 "https://$DOMAIN/_ils/health" |
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") is True and d.get("profile_signed") is True; print("PUBLIC_HTTPS_PROFILE_SIGNED_FLAG_TRUE")'
+echo 'SIGNING_READONLY_PLAN_PASS'
