@@ -9,6 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 DEPLOY=ROOT/"scripts/deploy-adhoc-ota-gateway.sh"
 SIGN=ROOT/"scripts/finish-ota-profile-signing.sh"
 AUDIT=ROOT/"scripts/ota-lightsail-audit.py"
+REBIND=ROOT/"scripts/ota-lightsail-rebind-local.py"
 
 
 class OTALightsailSafetyTests(unittest.TestCase):
@@ -17,6 +18,7 @@ class OTALightsailSafetyTests(unittest.TestCase):
             r=subprocess.run(["bash","-n",str(path)],capture_output=True,text=True)
             self.assertEqual(r.returncode,0,(path,r.stderr))
         ast.parse(AUDIT.read_text())
+        ast.parse(REBIND.read_text())
 
     def test_production_default_and_guardrails(self):
         d=DEPLOY.read_text()
@@ -40,6 +42,17 @@ class OTALightsailSafetyTests(unittest.TestCase):
                 self.assertNotEqual(r.returncode,0)
         r=subprocess.run(["bash",str(DEPLOY),"--apply-binary"],capture_output=True,text=True,timeout=5)
         self.assertNotEqual(r.returncode,0)
+
+    def test_local_rebind_does_not_rotate_credentials(self):
+        s=REBIND.read_text()
+        self.assertIn("remote_parity(token)",s)
+        self.assertIn("https_auth(token)",s)
+        self.assertIn("confirm-local-config-only",s)
+        self.assertIn('new["ssh_host"]=NEW_HOST',s)
+        self.assertIn('new["ssh_key_path"]=str(NEW_KEY)',s)
+        self.assertNotIn("openssl rand",s)
+        self.assertNotIn("stop-instances",s)
+        self.assertNotIn("systemctl restart",s)
 
     def test_signing_readonly(self):
         s=SIGN.read_text()
