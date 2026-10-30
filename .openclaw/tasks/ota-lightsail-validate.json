@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "title": "Run offline ILS OTA safety tests and Go regression/build; no production effects",
+  "steps": [
+    {
+      "name": "local_validation",
+      "runtime": "bash",
+      "script": "scripts/ota-lightsail-validate.sh",
+      "timeoutSeconds": 180
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "ota_validation",
+      "file": "ota_validation.json",
+      "format": "json"
+    }
+  ]
+}
