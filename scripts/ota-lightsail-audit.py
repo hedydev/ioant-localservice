@@ -63,10 +63,12 @@ if release.is_dir():
         if items:
             rel=items[0].relative_to(pathlib.Path("/srv/ils-adhoc-ota"))
             path="/"+str(rel)
-            c,body=cmd(["curl","--silent","--output","/dev/null","--write-out","%{http_code}",
+            c,body=cmd(["curl","--silent","--output","/dev/null","--write-out","%{http_code} %{content_type}",
                 "--noproxy","*","--resolve","ota.ioant.com:443:127.0.0.1","--max-time","8",
                 "-I","https://ota.ioant.com"+path])
-            r[k]=c==0 and body.strip()==b"200"
+            parts=body.decode("ascii","replace").split()
+            expected_mime="application/xml" if k=="existing_plist_head_ok" else "application/octet-stream"
+            r[k]=c==0 and len(parts)>=2 and parts[0]=="200" and parts[1].split(";")[0]==expected_mime
 print(json.dumps(r,sort_keys=True))
 '''
 
