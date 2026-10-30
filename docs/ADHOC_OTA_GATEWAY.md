@@ -47,6 +47,22 @@ Supported optional overrides: `--host`, `--ssh-user`, `--ssh-key`, `--domain`; `
 
 Certbot/TLS renewals belong to the **existing running server's** established renewal hook. Do not reinstall or reissue the production certificate through ILS's old deployment script. A new installation requires its own reviewed provisioning plan; `--prepare-only`, `--email` and implicit first-time state creation are intentionally unavailable.
 
+## Existing Mac ILS config: guarded local rebind
+
+**Changing the deployment script default is not enough**: running ILS reads the Mac-local `.localservice/ota-gateway.json` when contacting the Gateway. That file may still contain the pre-migration SSH target. New ILS code **refuses the stopped EC2 `52.77.167.119` and the unrelated Lightsail `13.228.218.141`** to prevent accidental remote OTA writes, but it does not silently rewrite machine-local settings.
+
+`scripts/ota-lightsail-rebind-local.py` provides a separate guarded local-only migration path:
+
+```sh
+python3 scripts/ota-lightsail-rebind-local.py --plan
+# Only after the plan verifies remote token parity and authenticated HTTPS:
+python3 scripts/ota-lightsail-rebind-local.py --apply --confirm-local-config-only
+```
+
+The script requires the existing `public_url=https://ota.ioant.com`, existing `remote_root=/srv/ils-adhoc-ota`, and a local private token that cryptographically matches the **existing** Lightsail token. It must also successfully perform a bearer-authenticated `GET /api/ils/devices/pending`. It then changes **only** `ssh_host` and `ssh_key_path` to the new Lightsail, atomically, with a mode-0600 backup of the original `ota-gateway.json`. It never changes the bearer token, domain, release root, devices, PEM certificates or any remote file.
+
+**Current execution:** not yet run on the Mac. OpenClaw ILS pinned execution was blocked by existing uncommitted local work. Do not report the local config rebound until it is observed.
+
 ## Safe read-only business audit
 
 `scripts/ota-lightsail-audit.py` is an OpenClaw pinned, read-only task. It checks:
