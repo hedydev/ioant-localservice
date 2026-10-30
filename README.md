@@ -159,7 +159,7 @@ Re-signing the same version and build can produce a different binary. If a diffe
 ILS supports two enrollment entry points that feed the **same local Device Registry**:
 
 - local enrollment through the ILS `public-url`, for LAN/VPN deployments;
-- public enrollment through the shared EC2 OTA Gateway, for devices that cannot reach the Mac directly.
+- public enrollment through the shared Lightsail OTA Gateway, for devices that cannot reach the Mac directly.
 
 When the OTA Gateway is configured, the iOS page points **Enroll this iPhone / iPad** to the Gateway's public `/enroll` page. The user downloads the one-time `.mobileconfig`, installs it from iOS Settings, and iOS sends UDID, product model and OS version back to the Gateway. The Gateway temporarily stores the pending device outside its public static directory. Local ILS then pulls the record over an authenticated HTTPS sync API and writes it into the existing `.localservice/devices/` registry. The Web UI shows whether the record came from `local_ils` or `public_ota_gateway`.
 
@@ -181,7 +181,7 @@ TLS can also terminate at a local HTTPS reverse proxy while ILS listens only on 
 
 A self-signed certificate must first become fully trusted by the device. Merely trusting an enrollment profile is not sufficient. The current implementation does not automatically create or install a root certificate and does not modify DNS or firewall settings.
 
-For the shared public EC2/Nginx OTA path, see [docs/ADHOC_OTA_GATEWAY.md](docs/ADHOC_OTA_GATEWAY.md). `scripts/deploy-adhoc-ota-gateway.sh` now deploys the private `cmd/ota-gateway` service behind Nginx, provisions Public Device Enrollment, creates the ILS↔Gateway sync credential, writes the local `.localservice/ota-gateway.json`, and preserves Certbot/Let's Encrypt HTTPS. Eligible Ad Hoc/Enterprise iOS Releases are synchronized from local ILS to the Gateway as `app.ipa + manifest.plist`; TestFlight Releases are never copied into this path. The local `-public-url` remains independent and is not rewritten.
+The shared public OTA Gateway now runs on the existing **Singapore Lightsail** `ioant-ls-wfk-20261026` (`13.213.140.184`) at `https://ota.ioant.com`, while the ILS main service remains on the Mac. The AWS EC2→Lightsail/DNS cutover is complete; the old WFK EC2 is stopped, not terminated. See [docs/ADHOC_OTA_GATEWAY.md](docs/ADHOC_OTA_GATEWAY.md) for the current production paths, read-only preflight, safe binary-only maintenance and unresolved post-migration enrollment/OTA business acceptance. `scripts/deploy-adhoc-ota-gateway.sh` defaults to **read-only `--plan`** and does not regenerate sync tokens, change signing materials, modify Nginx/Certbot, or rerun the migration. Eligible Ad Hoc/Enterprise iOS Releases remain synced as `app.ipa + manifest.plist`; TestFlight is excluded and the Mac ILS `-public-url` remains independent.
 
 ## Project and AI automated publishing
 
