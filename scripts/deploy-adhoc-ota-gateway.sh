@@ -78,10 +78,16 @@ if [[ "$MODE" == plan ]]; then
   exit 0
 fi
 command -v go >/dev/null || fail 'Go is unavailable for cross-build'
+REMOTE_ARCH="$(ssh "${SSH_OPTS[@]}" "$TARGET" uname -m)"
+case "$REMOTE_ARCH" in
+  x86_64|amd64) TARGET_GOARCH=amd64 ;;
+  aarch64|arm64) TARGET_GOARCH=arm64 ;;
+  *) fail "Unsupported Lightsail architecture: $REMOTE_ARCH" ;;
+esac
 TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
 BIN="$TEMP/ils-ota-gateway"
-(cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$BIN" ./cmd/ota-gateway)
+(cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH="$TARGET_GOARCH" go build -trimpath -o "$BIN" ./cmd/ota-gateway)
 REMOTE_TMP="/tmp/ils-ota-binary-$RANDOM$RANDOM"
 scp "${SSH_OPTS[@]}" "$BIN" "$TARGET:$REMOTE_TMP"
 ssh "${SSH_OPTS[@]}" "$TARGET" bash -s -- "$REMOTE_TMP" <<'REMOTE'
