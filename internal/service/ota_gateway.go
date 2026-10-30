@@ -87,6 +87,12 @@ func normalizeOTAGatewayConfig(cfg OTAGatewayConfig) (OTAGatewayConfig, error) {
 	if !otaSSHHostRE.MatchString(cfg.SSHHost) || !otaSSHUserRE.MatchString(cfg.SSHUser) {
 		return cfg, fmt.Errorf("OTA Gateway SSH host or user is invalid")
 	}
+	// Prevent a stale pre-migration local configuration from uploading IPA or
+	// deleting release paths on the stopped WFK EC2 / an unrelated Lightsail.
+	// The current production host remains machine-local config, not a Go default.
+	if cfg.SSHHost == "52.77.167.119" || cfg.SSHHost == "13.228.218.141" {
+		return cfg, fmt.Errorf("OTA Gateway SSH target is retired or belongs to another service; update the local Lightsail configuration before syncing")
+	}
 	if cfg.RemoteRoot == "" || !otaRemoteRootRE.MatchString(cfg.RemoteRoot) {
 		return cfg, fmt.Errorf("OTA Gateway remote_root must be a simple absolute path")
 	}
