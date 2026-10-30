@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "title": "Read-only Lightsail OTA, HTTPS, token parity and static artifact audit; no device writes",
+  "steps": [
+    {
+      "name": "production_readonly",
+      "runtime": "python",
+      "script": "scripts/ota-lightsail-audit.py",
+      "timeoutSeconds": 120
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "ota_audit",
+      "file": "ota_audit.json",
+      "format": "json"
+    }
+  ]
+}
