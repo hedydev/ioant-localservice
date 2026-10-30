@@ -81,11 +81,13 @@ The currently exercised device flow reached `apple_registered` / `ENABLED` for T
 
 Signed Enrollment Profile and final Ad Hoc OTA installation are considered operational by the user at this checkpoint; reopen them only if a real-device failure is reported.
 
+**2026-10-30 post-Lightsail qualification:** the statement above describes a *pre-migration* checkpoint and is not evidence of a completed fresh signed-profile, Device Registry sync, authenticated artifact sync or real iPhone install after the Lightsail cutover. These gates are pending per `ADHOC_OTA_GATEWAY.md`; no automatic device ACK, token rotation, restart or release publish is authorized by this documentation change.
+
 ## 5. OTA Gateway
 
 Public endpoint: `https://ota.ioant.com`
 
-EC2: `ubuntu@52.77.167.119`
+Current production: Lightsail `ioant-ls-wfk-20261026`, `ubuntu@13.213.140.184` (SSH key `~/.ssh/ioant-lightsail-20261026`). The old EC2 `52.77.167.119` is stopped, not an OTA target. AWS DNS/HTTPS cutover completed 2026-10-30; real post-migration OTA workflow acceptance remains separate.
 
 Static root: `/srv/ils-adhoc-ota`
 
